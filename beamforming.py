@@ -78,7 +78,7 @@ def get_delay(theta,x,y):
 
 def arr_resp(zeta,slowness,freq,R):
     """
-    calculate beam
+    calculate array response
     """
     beam = zeros((len(slowness),len(freq),len(theta)))
     for _s in slowness:
@@ -87,17 +87,15 @@ def arr_resp(zeta,slowness,freq,R):
             velocity = 1./_s*1000
             e_steer = exp(-1j*zeta*omega/velocity)
             beam[where(slowness==_s),where(freq==_f),:] = diag(abs(dot(dot(e_steer,R),conj(e_steer).T))**2)
-    tre = 10*log10(beam)
-    return tre
+    return beam
 
-def plot_beam(theta,slowness,beam):
+def plot_beam(ax,theta,slowness,beam):
     """
     Make a polar plot for the beamformer output.
     """
-    fig = figure(figsize=(6, 6))
     project='polar'
     #project='rectilinear'
-    ax = fig.add_axes([0.1, 0.1, 0.8, 0.8], projection=project, axisbg='white')
+    #ax = fig.add_axes([0.1, 0.1, 0.8, 0.8], projection=project, axisbg='white')
     ax.contourf(theta*pi/180.,slowness,beam,100)
     ax.set_rmax(0.5)
     ax.grid(True)
@@ -120,7 +118,6 @@ def load_trace():
     Nfreq = len(a['I'][0])
     seis = zeros((Nfreq,Nsub,Ntimes,nst),dtype='complex128')
     _nst = 0
-    print fl
     for _f in fl:
         b = sio.loadmat(_f)
         fseis = b['fseis']
@@ -144,7 +141,9 @@ def run_beam(zeta,slowness,freqs,traces):
     Ntimes = traces.shape[2]
     beam = zeros((len(slowness),len(freqs[0]),Ntimes,len(theta)))
     for _s in slowness:
-        for _f in freqs[0][18:19]:
+        print _s
+        #for _f in freqs[0][18:19]:
+        for _f in freqs[0]:
             ff = where(freqs[0]==_f)
             omega = 2*pi*_f
             velocity = 1./_s*1000
@@ -154,8 +153,8 @@ def run_beam(zeta,slowness,freqs,traces):
                 for TT in range(Nsub):
                     Y = asmatrix(squeeze(traces[ff,TT,tt,:]))
                     R = dot(Y.T,Y)
-                    #beamtemp = append(beamtemp,asmatrix(diag(abs(dot(dot(e_steer,R),e_steer.T))**2)).T,axis=1)
-                    beamtemp = append(beamtemp,sum(abs(dot(dot(e_steer,R),e_steer.T))**2,axis=1),axis=1)
+                    beamtemp = append(beamtemp,asmatrix(diag(abs(dot(dot(e_steer,R),e_steer.T))**2)).T,axis=1)
+                    #beamtemp = append(beamtemp,sum(abs(dot(dot(e_steer,R),e_steer.T))**2,axis=1),axis=1)
                 beam[where(slowness==_s),ff,tt,:] = squeeze(beamtemp[:,1::].mean(axis=1))
     return beam
 
@@ -163,22 +162,25 @@ if __name__ == '__main__':
     sta_origin_x, sta_origin_y = arr_geom(get_sac_list())
     #fig = plot_arr(sta_origin_x, sta_origin_y)
     theta= arange(0,362,2)
-    nsources=len(theta)
     zeta = get_delay(theta, sta_origin_x, sta_origin_y)
     slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
-    freq = array([0.05])
     R=ones((28,28))
-    get_sac_list()
-    load_trace()
-    beam = run_beam(zeta,slowness,get_freqs(),load_trace())
-    #print beam[:,4,0,:]
-    #beam = beam(zeta,slowness,freq,R)
-    sio.savemat('beam.mat',{'beam':beam})
+    #beam = run_beam(zeta,slowness,get_freqs(),load_trace())
+    #sio.savemat('beam.mat',{'beam':beam})
     #beam = sio.loadmat('beam.mat')['beam']
-    tre = beam.mean(axis=2)[:,18,:]
-    #tre = squeeze(beam[:,18,0,:])
-    tre = 10*log10(tre)
-    fig = plot_beam(theta,slowness,tre)
+    indx = array([0,10,30,48])
+    cnt = 1
+    fig = figure(figsize=(6, 6))
+    beam = arr_resp(zeta,slowness,get_freqs()[0],R)
+    for _f in get_freqs()[0][indx]:
+        ff = where(get_freqs()[0]==_f)
+        #tre = squeeze(beam.mean(axis=2)[:,ff,:])
+        tre = squeeze(beam[:,ff,:])
+        tre = 10*log10(tre)
+        ax = fig.add_subplot(2,2,cnt, projection='polar')
+        plot_beam(ax,theta,slowness,tre)
+        cnt += 1
+        title(str(_f))
     show()
 
-        
+
