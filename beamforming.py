@@ -15,13 +15,13 @@ from obspy.signal import rotate
 import scipy.io as sio
 
 def get_sac_list():
-    sacdir =  '/home/data/dev/beamforming/geopsy/dataII'
+    sacdir = '/data/wanakaII/yannik/cnipse/sacfiles/2001/Apr/2001_4_30_0_0_0/'
     a = sio.loadmat('BeamformInputData.mat')
     fl = glob.glob(os.path.join(a['matpath'][0],'*.mat'))
     newlist = []
     for _f in fl:
         stat = os.path.basename(_f).split('_')[0]
-        sacf = glob.glob(os.path.join(sacdir,'*'+stat+'*'))[0]
+        sacf = glob.glob(os.path.join(sacdir,'*'+stat+'*BHZ.SAC'))[0]
         newlist.append(sacf)
     return newlist
 
@@ -133,19 +133,18 @@ def get_freqs():
     return a['freq'][a['I']]
     
 
-def run_beam(zeta,slowness,freqs,traces):
+def run_beam(zeta,slowness,freqs,freq_ind,traces):
     """
     run beamforming
     """
     Nsub = traces.shape[1]
     Ntimes = traces.shape[2]
     beam = zeros((len(slowness),len(freqs[0]),Ntimes,len(theta)))
-    for _s in slowness:
-        print _s
-        #for _f in freqs[0][18:19]:
-        for _f in freqs[0]:
-            ff = where(freqs[0]==_f)
-            omega = 2*pi*_f
+    for _f in freqs[0][freq_ind]:
+        ff = where(freqs[0]==_f)
+        print "beamforming for frequency:",_f
+        omega = 2*pi*_f
+        for _s in slowness:
             velocity = 1./_s*1000
             e_steer = exp(-1j*zeta*omega/velocity)
             for tt in range(Ntimes):
@@ -160,22 +159,22 @@ def run_beam(zeta,slowness,freqs,traces):
 
 if __name__ == '__main__':
     sta_origin_x, sta_origin_y = arr_geom(get_sac_list())
-    #fig = plot_arr(sta_origin_x, sta_origin_y)
+    fig = plot_arr(sta_origin_x, sta_origin_y)
     theta= arange(0,362,2)
     zeta = get_delay(theta, sta_origin_x, sta_origin_y)
     slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
     R=ones((28,28))
-    #beam = run_beam(zeta,slowness,get_freqs(),load_trace())
-    #sio.savemat('beam.mat',{'beam':beam})
-    #beam = sio.loadmat('beam.mat')['beam']
     indx = array([0,10,30,48])
+    #beam = run_beam(zeta,slowness,get_freqs(),indx,load_trace())
+    #sio.savemat('beam.mat',{'beam':beam})
+    beam = sio.loadmat('beam.mat')['beam']
     cnt = 1
     fig = figure(figsize=(6, 6))
-    beam = arr_resp(zeta,slowness,get_freqs()[0],R)
+    #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
     for _f in get_freqs()[0][indx]:
         ff = where(get_freqs()[0]==_f)
-        #tre = squeeze(beam.mean(axis=2)[:,ff,:])
-        tre = squeeze(beam[:,ff,:])
+        tre = squeeze(beam.mean(axis=2)[:,ff,:])
+        #tre = squeeze(beam[:,ff,:])
         tre = 10*log10(tre)
         ax = fig.add_subplot(2,2,cnt, projection='polar')
         plot_beam(ax,theta,slowness,tre)

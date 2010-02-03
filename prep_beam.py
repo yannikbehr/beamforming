@@ -17,11 +17,12 @@ from pylab import plot, show
 
 
 year = 2002
-sacpath = '/home/data/dev/beamforming/geopsy/dataII'
+#sacpath = '/home/data/dev/beamforming/geopsy/dataII'
+sacpath = '/data/wanakaII/yannik/cnipse/sacfiles/2001/Apr/2001_4_30_0_0_0/'
 matpath = './Matfiles/'
 JD = '120'
 component = 'BHZ'
-allstations = glob.glob(os.path.join(sacpath,'*.SAC'))
+allstations = glob.glob(os.path.join(sacpath,'ft_grid*BHZ.SAC'))
 
 STATIONS = []
 Ista = 0
@@ -29,7 +30,7 @@ Ista = 0
 ### length of time vector
 fftpower = 7
 dt = 1
-Fsamp = 5
+Fsamp = 10
 Fmax=1/dt
 Nhours=3 #add up ffts over a 3 hour period
 Nhours=1 #ffting every hour
