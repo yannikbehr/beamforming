@@ -62,6 +62,7 @@ def plot_arr(x,y):
     ax.set_ylabel('Y-dist (km)')
     return fig
 
+
 def get_delay(theta,x,y):
     """
     calculate projection of location vector onto
@@ -75,6 +76,29 @@ def get_delay(theta,x,y):
     y.resize(1,len(y))
     zeta = dot(zeta_x,x) + dot(zeta_y,y)
     return zeta
+
+
+def arr_resp_src(zeta,slowness,freq,R,x,y):
+    """
+    calculate response for source at theta1 with slowness s1
+    """
+    theta1 = 270
+    zeta_x = -cos(theta1*pi/180.)
+    zeta_y = -sin(theta1*pi/180.)
+    zeta_src = zeta_x*x + zeta_y*y
+    s1 = 0.3
+    
+    beam = zeros((len(slowness),len(freq),len(theta)))
+    for _s in slowness:
+        for _f in freq:
+            omega = 2*pi*_f
+            velocity = 1./_s*1000
+            e_steer = exp(-1j*zeta*omega/velocity)
+            c1 = 1./s1*1000
+            e_src = exp(1j*zeta_src*omega/c1)
+            e_steer *= e_src
+            beam[where(slowness==_s),where(freq==_f),:] = diag(abs(dot(dot(e_steer,R),conj(e_steer).T))**2)
+    return beam
 
 def arr_resp(zeta,slowness,freq,R):
     """
@@ -167,15 +191,16 @@ if __name__ == '__main__':
     indx = array([0,10,30,48])
     #beam = run_beam(zeta,slowness,get_freqs(),indx,load_trace())
     #sio.savemat('beam.mat',{'beam':beam})
-    beam = sio.loadmat('beam.mat')['beam']
+    #beam = sio.loadmat('beam.mat')['beam']
     cnt = 1
     fig = figure(figsize=(6, 6))
     #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
+    beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
     for _f in get_freqs()[0][indx]:
         ff = where(get_freqs()[0]==_f)
-        tre = squeeze(beam.mean(axis=2)[:,ff,:])
-        #tre = squeeze(beam[:,ff,:])
-        tre = 10*log10(tre)
+        #tre = squeeze(beam.mean(axis=2)[:,ff,:])
+        tre = squeeze(beam[:,ff,:])
+        #tre = 10*log10(tre)
         ax = fig.add_subplot(2,2,cnt, projection='polar')
         plot_beam(ax,theta,slowness,tre)
         cnt += 1
