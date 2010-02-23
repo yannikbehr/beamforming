@@ -16,7 +16,7 @@ import scipy.io as sio
 
 def get_sac_list():
     sacdir = '/data/wanakaII/yannik/cnipse/sacfiles/2001/Apr/2001_4_30_0_0_0/'
-    a = sio.loadmat('BeamformInputData.mat')
+    a = sio.loadmat('/home/data/dev/proc-scripts_git/beamforming/BeamformInputData.mat')
     fl = glob.glob(os.path.join(a['matpath'][0],'*.mat'))
     newlist = []
     for _f in fl:
@@ -134,7 +134,7 @@ def load_trace():
     """
     Load .mat-files with preprocessed traces
     """
-    a = sio.loadmat('BeamformInputData.mat')
+    a = sio.loadmat('/home/data/dev/proc-scripts_git/beamforming/BeamformInputData.mat')
     fl = glob.glob(os.path.join(a['matpath'][0],'*.mat'))
     nst = len(fl)
     Nsub = int(a['Nsub'])
@@ -153,7 +153,7 @@ def get_freqs():
     """
     Load .mat-file and get frequency array
     """
-    a = sio.loadmat('BeamformInputData.mat')
+    a = sio.loadmat('/home/data/dev/proc-scripts_git/beamforming/BeamformInputData.mat')
     return a['freq'][a['I']]
     
 
@@ -184,27 +184,28 @@ def run_beam(zeta,slowness,freqs,freq_ind,traces):
 if __name__ == '__main__':
     sta_origin_x, sta_origin_y = arr_geom(get_sac_list())
     fig = plot_arr(sta_origin_x, sta_origin_y)
-    theta= arange(0,362,2)
-    zeta = get_delay(theta, sta_origin_x, sta_origin_y)
-    slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
-    R=ones((28,28))
-    indx = array([0,10,30,48])
-    #beam = run_beam(zeta,slowness,get_freqs(),indx,load_trace())
-    #sio.savemat('beam.mat',{'beam':beam})
-    #beam = sio.loadmat('beam.mat')['beam']
-    cnt = 1
-    fig = figure(figsize=(6, 6))
-    #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
-    beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
-    for _f in get_freqs()[0][indx]:
-        ff = where(get_freqs()[0]==_f)
-        #tre = squeeze(beam.mean(axis=2)[:,ff,:])
-        tre = squeeze(beam[:,ff,:])
-        #tre = 10*log10(tre)
-        ax = fig.add_subplot(2,2,cnt, projection='polar')
-        plot_beam(ax,theta,slowness,tre)
-        cnt += 1
-        title(str(_f))
-    show()
+    if False:
+        theta= arange(0,362,2)
+        zeta = get_delay(theta, sta_origin_x, sta_origin_y)
+        slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
+        R=ones((28,28))
+        indx = array([0,10,30,48])
+        #beam = run_beam(zeta,slowness,get_freqs(),indx,load_trace())
+        #sio.savemat('beam.mat',{'beam':beam})
+        #beam = sio.loadmat('beam.mat')['beam']
+        cnt = 1
+        fig = figure(figsize=(6, 6))
+        #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
+        beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
+        for _f in get_freqs()[0][indx]:
+            ff = where(get_freqs()[0]==_f)
+            #tre = squeeze(beam.mean(axis=2)[:,ff,:])
+            tre = squeeze(beam[:,ff,:])
+            #tre = 10*log10(tre)
+            ax = fig.add_subplot(2,2,cnt, projection='polar')
+            plot_beam(ax,theta,slowness,tre)
+            cnt += 1
+            title(str(_f))
+        show()
 
 
