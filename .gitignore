@@ -7,3 +7,5 @@ beam.mat
 saved_struct.mat
 test.ps
 Matfiles/*
+*.mat
+*.png
