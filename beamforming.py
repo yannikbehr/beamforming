@@ -16,13 +16,16 @@ import scipy.io as sio
 
 def get_sac_list():
     sacdir = '/data/wanakaII/yannik/cnipse/sacfiles/2001/Apr/2001_4_30_0_0_0/'
-    a = sio.loadmat('/home/data/dev/proc-scripts_git/beamforming/BeamformInputData.mat')
+    sacdirII = '/data/wanakaII/yannik/start/sacfiles/2001/Apr/2001_4_30_0_0_0/'
+    a = sio.loadmat('/home/data/dev/proc-scripts_git/beamforming/BeamformInputData_start_cnipse.mat',struct_as_record=True)
     fl = glob.glob(os.path.join(a['matpath'][0],'*.mat'))
     newlist = []
     for _f in fl:
         stat = os.path.basename(_f).split('_')[0]
-        sacf = glob.glob(os.path.join(sacdir,'*'+stat+'*BHZ.SAC'))[0]
-        newlist.append(sacf)
+        sacf = glob.glob(os.path.join(sacdir,'*'+stat+'*HZ.SAC'))
+        if len(sacf) < 1:
+            sacf = glob.glob(os.path.join(sacdirII,'*'+stat+'*HZ.SAC'))
+        newlist.append(sacf[0])
     return newlist
 
 def arr_geom(filelist):
@@ -184,19 +187,19 @@ def run_beam(zeta,slowness,freqs,freq_ind,traces):
 if __name__ == '__main__':
     sta_origin_x, sta_origin_y = arr_geom(get_sac_list())
     fig = plot_arr(sta_origin_x, sta_origin_y)
-    if False:
+    if True:
         theta= arange(0,362,2)
         zeta = get_delay(theta, sta_origin_x, sta_origin_y)
         slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
-        R=ones((28,28))
+        R=ones((46,46))
         indx = array([0,10,30,48])
         #beam = run_beam(zeta,slowness,get_freqs(),indx,load_trace())
         #sio.savemat('beam.mat',{'beam':beam})
         #beam = sio.loadmat('beam.mat')['beam']
         cnt = 1
         fig = figure(figsize=(6, 6))
-        #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
-        beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
+        beam = arr_resp(zeta,slowness,get_freqs()[0],R)
+        #beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
         for _f in get_freqs()[0][indx]:
             ff = where(get_freqs()[0]==_f)
             #tre = squeeze(beam.mean(axis=2)[:,ff,:])
@@ -206,6 +209,6 @@ if __name__ == '__main__':
             plot_beam(ax,theta,slowness,tre)
             cnt += 1
             title(str(_f))
-        show()
+    show()
 
 

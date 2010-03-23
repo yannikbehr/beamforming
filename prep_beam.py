@@ -19,10 +19,12 @@ from pylab import plot, show
 year = 2002
 #sacpath = '/home/data/dev/beamforming/geopsy/dataII'
 sacpath = '/data/wanakaII/yannik/cnipse/sacfiles/2001/Apr/2001_4_30_0_0_0/'
+sacpathII = '/data/wanakaII/yannik/start/sacfiles/2001/Apr/2001_4_30_0_0_0/'
 matpath = './Matfiles/'
 JD = '120'
 component = 'BHZ'
-allstations = glob.glob(os.path.join(sacpath,'ft_grid*BHZ.SAC'))
+allstations = glob.glob(os.path.join(sacpath,'ft_grid*.*HZ.SAC'))
+allstations += glob.glob(os.path.join(sacpathII,'ft_grid*.*HZ.SAC'))
 
 STATIONS = []
 Ista = 0
@@ -151,6 +153,6 @@ for _f in allstations:
     fseis = np.squeeze(fseis[0,:,:,:])
     scipy.io.savemat(outfile,{'fseis':fseis,'Imin':Imin,'Imax':Imax,'frq':frq,'fftpower':fftpower})
 
-outfile = 'BeamformInputData'
+outfile = 'BeamformInputData_start_cnipse'
 scipy.io.savemat(outfile,{'I':I,'JD':JD,'freq':freq,'Nsub':Nsub,'Ntimes':Ntimes,'matpath':matpath,'year':year})
     
