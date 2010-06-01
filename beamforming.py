@@ -20,7 +20,8 @@ def get_sac_list(sacdirs,matfile):
     fl = glob.glob(os.path.join(a['matpath'][0],'*.mat'))
     newlist = []
     for _f in fl:
-        stat = os.path.basename(_f).split('_')[0]
+        #stat = os.path.basename(_f).split('_')[0]
+        stat = os.path.basename(_f).split('62')[0]
         for _sd in sacdirs:
             sacf = glob.glob(os.path.join(_sd,'*'+stat+'*HZ.SAC'))
             if len(sacf) > 1:
@@ -49,8 +50,8 @@ def arr_geom(filelist):
         sta_origin_dist = append(sta_origin_dist,dist)
         sta_origin_bearing = append(sta_origin_bearing,az)
 
-    sta_origin_x = sta_origin_dist*sin(sta_origin_bearing*pi/180.)
-    sta_origin_y = sta_origin_dist*cos(sta_origin_bearing*pi/180.)
+    sta_origin_x = sta_origin_dist*cos(sta_origin_bearing*pi/180.)
+    sta_origin_y = sta_origin_dist*sin(sta_origin_bearing*pi/180.)
     return sta_origin_x, sta_origin_y
 
 
@@ -124,7 +125,7 @@ def plot_beam(ax,theta,slowness,beam):
     Make a polar plot for the beamformer output.
     """
     cmap = cm.get_cmap('jet')
-    ax.contourf((theta[::-1]+90.)*pi/180.,slowness,beam.T,100,cmap=cmap,antialiased=True,
+    ax.contourf((theta[::-1]-90.)*pi/180.,slowness,beam,100,cmap=cmap,antialiased=True,
                 linstyles='dotted')
     ax.set_rmax(0.5)
     ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
@@ -180,8 +181,8 @@ def run_beam(zeta,slowness,freqs,freq_ind,traces,new=False,fout='beam.mat'):
                     for TT in range(Nsub):
                         Y = asmatrix(squeeze(traces[ff,TT,tt,:]))
                         R = dot(Y.T,Y)
-                        beamtemp = append(beamtemp,asmatrix(diag(abs(dot(dot(e_steer,R),e_steer.T))**2)).T,axis=1)
-                        #beamtemp = append(beamtemp,sum(abs(dot(dot(e_steer,R),e_steer.T))**2,axis=1),axis=1)
+                        #beamtemp = append(beamtemp,asmatrix(diag(abs(dot(dot(e_steer,R),e_steer.T))**2)).T,axis=1)
+                        beamtemp = append(beamtemp,sum(abs(dot(dot(e_steer,R),e_steer.T))**2,axis=1),axis=1)
                     beam[where(slowness==_s),ff,tt,:] = squeeze(beamtemp[:,1::].mean(axis=1))
         sio.savemat(fout,{'beam':beam})
     if not new:
@@ -189,35 +190,42 @@ def run_beam(zeta,slowness,freqs,freq_ind,traces,new=False,fout='beam.mat'):
     return beam
 
 if __name__ == '__main__':
-    if False:
+    theta= arange(0,362,2)
+    slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
+    indx = array([18])
+    if True:
         matfile = '/home/data/dev/proc-scripts_git/beamforming/BeamformInputData_start.mat'
         sacdirs = ['/data/wanakaII/yannik/start/sacfiles/2001/Mar/2001_3_3_0_0_0/']
         sta_origin_x, sta_origin_y = arr_geom(get_sac_list(sacdirs,matfile))
         fig = plot_arr(sta_origin_x, sta_origin_y)
-    if True:
-        theta= arange(0,362,2)
-        #zeta = get_delay(theta, sta_origin_x, sta_origin_y)
-        slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
-        #R=ones((sta_origin_x.size,sta_origin_x.size))
-        #indx = array([0,10,30,48])
-        indx = array([18])
-        #beam = run_beam(zeta,slowness,get_freqs(matfile),indx,load_trace(matfile),new=True,fout='beam_0.1641.mat')
-        cnt = 1
-        fig = figure(figsize=(6, 6))
+    if False:
+        zeta = get_delay(theta, sta_origin_x, sta_origin_y)
         #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
         #beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
-        beam = sio.loadmat('beam62.mat')['beam']
+        #R=ones((sta_origin_x.size,sta_origin_x.size))
+        #indx = array([0,10,30,48])
+        beam = run_beam(zeta,slowness,get_freqs(matfile),indx,load_trace(matfile),new=True,fout='beam_test.mat')
+    if False:
+        rawdatf = 'BeamformInputData53.mat'
+        rawdat = sio.loadmat(rawdatf)
+        
+    if True:
+        cnt = 1
+        fig = figure(figsize=(6, 6))
+        beam1 = sio.loadmat('beam62.mat')['beam']
         for _f in get_freqs(matfile)[0][indx]:
             ff = where(get_freqs(matfile)[0]==_f)
-            tre = squeeze(beam[:,ff,:,:])
+            tre = squeeze(beam[:,:,ff,:])
+            tre = squeeze(beam1[:,ff,:,:])
+            #tre = tre.mean(axis=1)
             tre = tre.mean(axis=2)
             tre = tre-tre.max()
             #tre = 10*log10(tre)
             print _f
             ax = fig.add_subplot(1,1,cnt, projection='polar')
-            plot_beam(ax,theta,slowness,tre)
+            plot_beam(ax,theta,slowness,tre.T)
             cnt += 1
             title(str(_f))
-    show()
+        show()
 
 

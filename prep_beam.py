@@ -25,7 +25,7 @@ sacpath = '/data/wanakaII/yannik/start/sacfiles/2001/Mar/2001_3_3_0_0_0/'
 matpath = './Matfiles_start/' 
 JD = '62'
 component = 'HHZ'
-allstations = glob.glob(os.path.join(sacpath,'ft_grid*.*HZ.SAC'))
+allstations = glob.glob(os.path.join(sacpath,'ft_grid*.HHZ.SAC'))
 #allstations += glob.glob(os.path.join(sacpathII,'ft_grid*.*HZ.SAC'))
 if len(allstations) < 1:
     raise BeamFormException("list of input files is empty")
