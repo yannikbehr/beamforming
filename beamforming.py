@@ -13,6 +13,7 @@ from obspy.sac import *
 from pylab import *
 from obspy.signal import rotate
 import scipy.io as sio
+from matplotlib import cm
 
 def get_sac_list(sacdirs,matfile):
     a = sio.loadmat(matfile,struct_as_record=True)
@@ -122,18 +123,15 @@ def plot_beam(ax,theta,slowness,beam):
     """
     Make a polar plot for the beamformer output.
     """
-    project='polar'
-    #project='rectilinear'
-    #ax = fig.add_axes([0.1, 0.1, 0.8, 0.8], projection=project, axisbg='white')
-    ax.contourf(theta*pi/180.,slowness,beam,100)
+    cmap = cm.get_cmap('jet')
+    ax.contourf((theta[::-1]+90.)*pi/180.,slowness,beam.T,100,cmap=cmap,antialiased=True,
+                linstyles='dotted')
     ax.set_rmax(0.5)
+    ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                      labels=['90','45','0','315','270','225','180','135'])
+    ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
     ax.grid(True)
-    #y = mat(slowness)
-    #x = mat(theta*pi/180.).T
-    #print x.shape, y.shape
-    #Y1 = dot(ones((len(x),1)),y)
-    #X1 = dot(x,ones((1,len(y))))
-    return fig
+    return 
 
 def load_trace(matfile):
     """
@@ -191,29 +189,32 @@ def run_beam(zeta,slowness,freqs,freq_ind,traces,new=False,fout='beam.mat'):
     return beam
 
 if __name__ == '__main__':
-    matfile = '/home/data/dev/proc-scripts_git/beamforming/BeamformInputData_start.mat'
-    sacdirs = ['/data/wanakaII/yannik/start/sacfiles/2001/Mar/2001_3_3_0_0_0/']
-    sta_origin_x, sta_origin_y = arr_geom(get_sac_list(sacdirs,matfile))
-    fig = plot_arr(sta_origin_x, sta_origin_y)
+    if False:
+        matfile = '/home/data/dev/proc-scripts_git/beamforming/BeamformInputData_start.mat'
+        sacdirs = ['/data/wanakaII/yannik/start/sacfiles/2001/Mar/2001_3_3_0_0_0/']
+        sta_origin_x, sta_origin_y = arr_geom(get_sac_list(sacdirs,matfile))
+        fig = plot_arr(sta_origin_x, sta_origin_y)
     if True:
         theta= arange(0,362,2)
-        zeta = get_delay(theta, sta_origin_x, sta_origin_y)
+        #zeta = get_delay(theta, sta_origin_x, sta_origin_y)
         slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
-        R=ones((sta_origin_x.size,sta_origin_x.size))
+        #R=ones((sta_origin_x.size,sta_origin_x.size))
         #indx = array([0,10,30,48])
         indx = array([18])
-        beam = run_beam(zeta,slowness,get_freqs(matfile),indx,load_trace(matfile),new=True,fout='beam_0.1641.mat')
+        #beam = run_beam(zeta,slowness,get_freqs(matfile),indx,load_trace(matfile),new=True,fout='beam_0.1641.mat')
         cnt = 1
         fig = figure(figsize=(6, 6))
         #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
         #beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
+        beam = sio.loadmat('beam62.mat')['beam']
         for _f in get_freqs(matfile)[0][indx]:
             ff = where(get_freqs(matfile)[0]==_f)
-            tre = squeeze(beam.mean(axis=2)[:,ff,:])
-            #tre = squeeze(beam[:,ff,:])
-            tre = 10*log10(tre)
+            tre = squeeze(beam[:,ff,:,:])
+            tre = tre.mean(axis=2)
+            tre = tre-tre.max()
+            #tre = 10*log10(tre)
             print _f
-            ax = fig.add_subplot(2,2,cnt, projection='polar')
+            ax = fig.add_subplot(1,1,cnt, projection='polar')
             plot_beam(ax,theta,slowness,tre)
             cnt += 1
             title(str(_f))
