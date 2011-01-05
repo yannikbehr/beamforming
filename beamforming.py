@@ -1,8 +1,6 @@
 #!/usr/bin/env mypython
-
 """
-script to calculate array impulse response for a
-given geometry
+next try to rewrite laura's beamformer
 """
 
 import os
@@ -13,219 +11,199 @@ from obspy.sac import *
 from pylab import *
 from obspy.signal import rotate
 import scipy.io as sio
-from matplotlib import cm
+from matplotlib import cm, rcParams
+rcParams = {'backend':'Agg'}
 
-def get_sac_list(sacdirs,matfile):
-    a = sio.loadmat(matfile,struct_as_record=True)
-    fl = glob.glob(os.path.join(a['matpath'][0],'*.mat'))
-    newlist = []
-    for _f in fl:
-        #stat = os.path.basename(_f).split('_')[0]
-        stat = os.path.basename(_f).split('62')[0]
-        for _sd in sacdirs:
-            sacf = glob.glob(os.path.join(_sd,'*'+stat+'*HZ.SAC'))
-            if len(sacf) > 1:
-                newlist.append(sacf[0])
-                break
-    return newlist
+def read_matfiles():
+    year=2001
+    sacpath = './START_DATA_TEST/'
+    matpath = './Matfiles_start_TEST/'
+    JulianDay=88
+    JD='88'
+    beamdict = sio.loadmat('BeamformInputData_test.mat')
+    infom = beamdict['infom']
+    I = beamdict['I']
+    matpath = beamdict['matpath']
+    matpath = [u'./Matfiles_test']
+    Nsub = beamdict['Nsub']
+    Ntimes = beamdict['Ntimes']
+    freq = beamdict['freq']
+    slons = array([])
+    slats = array([])
+    for i in infom[0]:
+        slons = append(slons,i.slon)
+        slats = append(slats,i.slat)
 
-def arr_geom(filelist):
-    """
-    calculate array geometry from given
-    list of sac-files
-    """
-    slon = []
-    slat = []
+    LonLref= 165
+    LonUref= 179.9
+    LatLref= -48
+    LatUref= -34
+    stacoord=vstack((slons,slats))
+    ##Find the stations which belong to this grid
+    idx = where((stacoord[0] >= LonLref) & (stacoord[0] <= LonUref) & \
+                (stacoord[1] >= LatLref) & (stacoord[1] <= LatUref))
+    #nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
+    meanlat = slats.mean()
+    meanlon = slons.mean()
+
+    Nfreq = I.size;
+    seis1 = zeros((Nfreq,Nsub,Ntimes,idx[0].size),'complex128')
+    ic = 0
+    for ista in xrange(idx[0].size):
+        sta1 = infom[0][ista].staname
+        filename = os.path.join(matpath[0],sta1[0]+JD+'.mat')
+        if not os.path.isfile(filename):
+            print filename, ' did not exist'
+            continue
+        fseis = sio.loadmat(filename)['fseis']
+        seis1[:,:,:,ic] = fseis
+        ic += 1
+    #frequencies within our range of interest
+    freqs = freq[0][I-1]
+    return Ntimes, freqs, slons, slats, seis1,meanlat,meanlon
+
+
+def calc_steer(slats,slons):
+    theta= arange(0,362,2)
+    theta = theta.reshape((theta.size,1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
-    for _f in filelist:
-        x = ReadSac(_f,headonly=True)
-        slon.append(x.GetHvalue('stlo'))
-        slat.append(x.GetHvalue('stla'))
-
-    meanlat = mean(slat)
-    meanlon = mean(slon)
-    for lat,lon in zip(slat,slon):
+    for lat,lon in zip(slats,slons):
         dist, az, baz = rotate.gps2DistAzimuth(meanlat,meanlon,lat,lon)
         sta_origin_dist = append(sta_origin_dist,dist)
         sta_origin_bearing = append(sta_origin_bearing,az)
-
     sta_origin_x = sta_origin_dist*cos(sta_origin_bearing*pi/180.)
     sta_origin_y = sta_origin_dist*sin(sta_origin_bearing*pi/180.)
-    return sta_origin_x, sta_origin_y
-
-
-def plot_arr(x,y):
-    """
-    plot array geometry
-    """
-    fig = figure()
-    ax = fig.add_subplot(1,1,1)
-    ax.plot(x,y,'b*')
-    ax.set_xlabel('X-dist (km)')
-    ax.set_ylabel('Y-dist (km)')
-    return fig
-
-
-def get_delay(theta,x,y):
-    """
-    calculate projection of location vector onto
-    steering vector
-    """
+    #zeta_x = sta_origin_dist*cos(sta_origin_bearing*pi/180.)
+    #zeta_y = sta_origin_dist*sin(sta_origin_bearing*pi/180.)
     zeta_x = -cos(theta*pi/180.)
     zeta_y = -sin(theta*pi/180.)
-    zeta_x.resize(len(zeta_x),1)
-    zeta_y.resize(len(zeta_y),1)
-    x.resize(1,len(x))
-    y.resize(1,len(y))
-    zeta = dot(zeta_x,x) + dot(zeta_y,y)
-    return zeta
+    #dot product betwen zeta and x
+    zetax = zeta_x*sta_origin_x+zeta_y*sta_origin_y
+    #slowness in s/km
+    slowness = arange(0.03,0.505,0.005)
+    slowness = slowness.reshape((1,slowness.size))
+    return zetax,theta,slowness,sta_origin_x,sta_origin_y
 
 
-def arr_resp_src(zeta,slowness,freq,R,x,y):
-    """
-    calculate response for source at theta1 with slowness s1
-    """
-    theta1 = 270
-    zeta_x = -cos(theta1*pi/180.)
-    zeta_y = -sin(theta1*pi/180.)
-    zeta_src = zeta_x*x + zeta_y*y
-    s1 = 0.3
-    
-    beam = zeros((len(slowness),len(freq),len(theta)))
-    for _s in slowness:
-        for _f in freq:
-            omega = 2*pi*_f
-            velocity = 1./_s*1000
-            e_steer = exp(-1j*zeta*omega/velocity)
-            c1 = 1./s1*1000
-            e_src = exp(1j*zeta_src*omega/c1)
-            e_steer *= e_src
-            beam[where(slowness==_s),where(freq==_f),:] = diag(abs(dot(dot(e_steer,R),conj(e_steer).T))**2)
+
+def beamforming(seis1,freqs,slowness,zetax,nsources,Ntimes,new=True,matfile=None):
+    if new:
+        beam = zeros((nsources,freqs.size,slowness.size,Ntimes))
+        for ww in [18]:
+            FF = freqs[0][ww]
+            for cc in xrange(slowness.shape[1]):
+                omega = 2*pi*FF
+                velocity = 1./slowness[0][cc]*1000
+                e_steer=exp(-1j*zetax*omega/velocity).T
+                beamtemp = empty((len(theta),1))
+                beamtemp = None
+                for tt in xrange(Ntimes):
+                    for TT in xrange(seis1.shape[1]):
+                        Y = asmatrix(squeeze(seis1[ww,TT,tt,:],))
+                        R = dot(Y.T,conjugate(Y))
+                        if beamtemp is None:
+                            beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+                        else:
+                            beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))))
+
+                    beam[:,ww,cc,tt] = transpose(beamtemp).mean(axis=1)
+        sio.savemat(matfile,{'beam':beam})
+    else:
+        beam = sio.loadmat(matfile)['beam']
     return beam
 
-def arr_resp(zeta,slowness,freq,R):
+def arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
+             new=True,matfile=None,src=False,fout=None,pplot=True):
     """
     calculate array response
     """
-    try:
-        beam = zeros((len(slowness),len(freq),len(theta)))
-        for _s in slowness:
-            for _f in freq:
-                omega = 2*pi*_f
-                velocity = 1./_s*1000
-                e_steer = exp(-1j*zeta*omega/velocity)
-                beam[where(slowness==_s),where(freq==_f),:] = diag(abs(dot(dot(e_steer,R),conj(e_steer).T))**2)
-    except:
-        import pdb; pdb.set_trace()
-    return beam
+    if new:
+        theta1 = 90
+        zeta_x = -cos(theta1*pi/180.)
+        zeta_y = -sin(theta1*pi/180.)
+        zeta_src = zeta_x*sta_origin_x + zeta_y*sta_origin_y
+        c1 = 3000
+        beam = zeros((zetax.shape[0],freqs.size,slowness.size))
+        for ww in xrange(freqs.shape[1]):
+            FF = freqs[0][ww]
+            for cc in xrange(slowness.shape[1]):
+                omega = 2*pi*FF
+                velocity = 1./slowness[0][cc]*1000
+                e_steer=exp(-1j*zetax*omega/velocity).T
+                if src:
+                    e_src = exp(-1j*zeta_src*omega/c1).T
+                    Y = multiply(ones((zetax.shape[1],1),'complex128'),atleast_2d(e_src).T)
+                    Y = ones((zetax.shape[1],1),'complex128')
+                    R = dot(Y,conjugate(Y).T)
+                else:
+                    R = ones((zetax.shape[1],zetax.shape[1]))
+                beam[:,ww,cc] = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+        sio.savemat(matfile,{'beam':beam})
+    else:
+        beam = sio.loadmat(matfile)['beam']
+    theta = theta[:,0]
+    slowness = slowness[0,:]
+    fig = figure(figsize=(10,10))
+    ff = [5,7,10,18]
+    if pplot:
+        for _r in xrange(4):
+            tre = squeeze(beam[:,ff[_r],:])
+            tre = tre-tre.max()
+            ax = fig.add_subplot(2,2,_r+1,projection='polar')
+            cmap = cm.get_cmap('jet')
+            ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                        100,cmap=cmap,antialiased=True,
+                        linewidths=0.1,linstyles='dotted')
+            ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                       100,cmap=cmap)
+            #ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+            #                  labels=['90','45','0','315','270','225','180','135'])
+            ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                              labels=[])
+            ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','s/km'],color='r')
+            ax.grid(True)
+            ax.set_title(os.path.basename("%.1f s"%(round(1./freqs[0][ff[_r]],1))))
+            ax.set_rmax(0.5)
+        savefig(fout)
+        show()
+        
 
-def plot_beam(ax,theta,slowness,beam):
-    """
-    Make a polar plot for the beamformer output.
-    """
+def polar_plot(beam,theta,slowness,resp=False):
+    theta = theta[:,0]
+    slowness = slowness[0,:]
+    if resp:
+        tre = squeeze(beam[:,18,:])
+    else:
+        tre = squeeze(beam[:,18,:,:])
+        tre = tre.mean(axis=2)
+    tre = tre-tre.max()
+    idx = where((slowness>0.2) & (slowness<0.4))
+    new_tre = tre[:,idx[0]]
+    id1,id2 = unravel_index(new_tre.argmax(),new_tre.shape)
+    fig = figure(figsize=(6,6))
+    ax = fig.add_subplot(1,1,1,projection='polar')
     cmap = cm.get_cmap('jet')
-    ax.contourf((theta[::-1]-90.)*pi/180.,slowness,beam,100,cmap=cmap,antialiased=True,
-                linstyles='dotted')
-    ax.set_rmax(0.5)
+    ax.contourf((theta[::-1]+90.)*pi/180.,slowness[14:],tre[:,14:].T,
+                100,cmap=cmap,antialiased=True,
+                linewidths=0.1,linstyles='dotted')
+    ax.contour((theta[::-1]+90.)*pi/180.,slowness[14:],tre[:,14:].T,
+                100,cmap=cmap)
     ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
                       labels=['90','45','0','315','270','225','180','135'])
     ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
     ax.grid(True)
-    return 
-
-def load_trace(matfile):
-    """
-    Load .mat-files with preprocessed traces
-    """
-    a = sio.loadmat(matfile)
-    fl = glob.glob(os.path.join(a['matpath'][0],'*.mat'))
-    nst = len(fl)
-    Nsub = int(a['Nsub'])
-    Ntimes = int(a['Ntimes'])
-    Nfreq = len(a['I'][0])
-    seis = zeros((Nfreq,Nsub,Ntimes,nst),dtype='complex128')
-    _nst = 0
-    for _f in fl:
-        b = sio.loadmat(_f)
-        fseis = b['fseis']
-        seis[:,:,:,_nst] = fseis.copy()
-        _nst += 1
-    return  seis
-
-def get_freqs(matfile):
-    """
-    Load .mat-file and get frequency array
-    """
-    a = sio.loadmat(matfile)
-    return a['freq'][a['I']]
-    
-
-def run_beam(zeta,slowness,freqs,freq_ind,traces,new=False,fout='beam.mat'):
-    """
-    run beamforming
-    """
-    if new:
-        Nsub = traces.shape[1]
-        Ntimes = traces.shape[2]
-        beam = zeros((len(slowness),len(freqs[0]),Ntimes,len(theta)))
-        for _f in freqs[0][freq_ind]:
-            ff = where(freqs[0]==_f)
-            print "beamforming for frequency:",_f
-            omega = 2*pi*_f
-            for _s in slowness:
-                velocity = 1./_s*1000
-                e_steer = exp(-1j*zeta*omega/velocity)
-                for tt in range(Ntimes):
-                    beamtemp = empty((len(theta),1))
-                    for TT in range(Nsub):
-                        Y = asmatrix(squeeze(traces[ff,TT,tt,:]))
-                        R = dot(Y.T,Y)
-                        #beamtemp = append(beamtemp,asmatrix(diag(abs(dot(dot(e_steer,R),e_steer.T))**2)).T,axis=1)
-                        beamtemp = append(beamtemp,sum(abs(dot(dot(e_steer,R),e_steer.T))**2,axis=1),axis=1)
-                    beam[where(slowness==_s),ff,tt,:] = squeeze(beamtemp[:,1::].mean(axis=1))
-        sio.savemat(fout,{'beam':beam})
-    if not new:
-        beam = sio.loadmat(fout)['beam']
-    return beam
+    #ax.set_title(os.path.basename(_d))
+    ax.set_rmax(0.5)
+    show()
 
 if __name__ == '__main__':
-    theta= arange(0,362,2)
-    slowness=arange(0.03,0.505,0.005)  ###slowness in s/km
-    indx = array([18])
-    if True:
-        matfile = '/home/data/dev/proc-scripts_git/beamforming/BeamformInputData_start.mat'
-        sacdirs = ['/data/wanakaII/yannik/start/sacfiles/2001/Mar/2001_3_3_0_0_0/']
-        sta_origin_x, sta_origin_y = arr_geom(get_sac_list(sacdirs,matfile))
-        fig = plot_arr(sta_origin_x, sta_origin_y)
-    if False:
-        zeta = get_delay(theta, sta_origin_x, sta_origin_y)
-        #beam = arr_resp(zeta,slowness,get_freqs()[0],R)
-        #beam = arr_resp_src(zeta,slowness,get_freqs()[0],R,sta_origin_x, sta_origin_y)
-        #R=ones((sta_origin_x.size,sta_origin_x.size))
-        #indx = array([0,10,30,48])
-        beam = run_beam(zeta,slowness,get_freqs(matfile),indx,load_trace(matfile),new=True,fout='beam_test.mat')
-    if False:
-        rawdatf = 'BeamformInputData53.mat'
-        rawdat = sio.loadmat(rawdatf)
-        
-    if True:
-        cnt = 1
-        fig = figure(figsize=(6, 6))
-        beam1 = sio.loadmat('beam62.mat')['beam']
-        for _f in get_freqs(matfile)[0][indx]:
-            ff = where(get_freqs(matfile)[0]==_f)
-            tre = squeeze(beam[:,:,ff,:])
-            tre = squeeze(beam1[:,ff,:,:])
-            #tre = tre.mean(axis=1)
-            tre = tre.mean(axis=2)
-            tre = tre-tre.max()
-            #tre = 10*log10(tre)
-            print _f
-            ax = fig.add_subplot(1,1,cnt, projection='polar')
-            plot_beam(ax,theta,slowness,tre.T)
-            cnt += 1
-            title(str(_f))
-        show()
-
-
+    Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
+    zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+    if 0:
+        beam = beamforming(seis,freqs,slowness,zetax,theta.size,Ntimes,new=False,matfile='6s_average_beam.mat')
+        polar_plot(beam,theta,slowness,resp=True)
+    if 1:
+        arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
+                 matfile='array_response_start.mat',new=False,src=True,
+                 fout='array_response_start.pdf')
