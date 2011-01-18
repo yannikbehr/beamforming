@@ -17,10 +17,9 @@ from matplotlib import cm, rcParams
 rcParams = {'backend':'Agg'}
 
 DEBUG = True
-def prep_beam(files,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,tempfilter=False):
+def prep_beam(files,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,tempfilter=False,fact=10):
     ntimes = int(round(24/nhours))
-    step = nhours*3600*fmax
-    fs = fmax/step
+    step = nhours*3600*fmax/fact
 
     stations = []
     slons = array([])
@@ -36,11 +35,12 @@ def prep_beam(files,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,tempfilter=F
         slon = tr.stats.sac.stlo
         slons = append(slons,tr.stats.sac.stlo)
         slats = append(slats,tr.stats.sac.stla)
-        df = tr.stats.sampling_rate
-        dt = tr.stats.delta
         if staname not in stations:
             stations.append(staname)
+        tr.downsample(decimation_factor=fact, strict_length=True)
         npts = tr.stats.npts
+        df = tr.stats.sampling_rate
+        dt = tr.stats.delta
         seis0 = zeros(24*3600*int(df))
         seis0[0:npts] = tr.data
         seis0 -= seis0.mean()
@@ -63,7 +63,7 @@ def prep_beam(files,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,tempfilter=F
         fftpower = 7
         ismall = 2**fftpower
         ipick = arange(ismall)
-        n=nhours*3600*fmax
+        n=nhours*3600*df
         nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
         seissmall = zeros((nfiles,ntimes,nsub,len(ipick)))
         for ii in xrange(nfiles):
@@ -71,9 +71,7 @@ def prep_beam(files,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,tempfilter=F
                 for kk in xrange(nsub):
                     seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]
 
-
-
-    fseis = fft(seisband,axis=2)
+    fseis = fft(seissmall,n=2**fftpower,axis=3)
     if np.isnan(fseis).any():
         print "NaN found"
         return
@@ -171,10 +169,12 @@ def beamforming(seis1,slowness,zetax,nsources,Ntimes,dt,new=True,matfile=None,fr
     if new:
         _p = 6.
         _f = 1./_p
-        freq = fftfreq(seis1.shape[2],dt)
-        ind = searchsorted(freq[0:int(seis1.shape[2]/2)],_f)
+        freq = fftfreq(seis1.shape[3],dt)
+        print freq
+        ind = searchsorted(freq[0:int(seis1.shape[3]/2)],_f,side='left')
         I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
         beam = zeros((nsources,slowness.size,Ntimes))
+        ind = 21
         print ind, freq[ind]
         for ww in [ind]:
             FF = freq[ww]
@@ -184,14 +184,14 @@ def beamforming(seis1,slowness,zetax,nsources,Ntimes,dt,new=True,matfile=None,fr
                 e_steer=exp(-1j*zetax*omega/velocity).T
                 beamtemp = empty((len(theta),1))
                 beamtemp = None
-                for tt in xrange(Ntimes):
-                    #for TT in xrange(seis1.shape[1]):
-                    Y = asmatrix(squeeze(seis1[:,tt,ww],))
-                    R = dot(Y.T,conjugate(Y))
-                    if beamtemp is None:
-                        beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
-                    else:
-                        beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))))
+                for tt in xrange(seis1.shape[1]):
+                    for TT in xrange(seis1.shape[2]):
+                        Y = asmatrix(squeeze(seis1[:,tt,TT,ww],))
+                        R = dot(Y.T,conjugate(Y))
+                        if beamtemp is None:
+                            beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+                        else:
+                            beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))))
 
                     beam[:,cc,tt] = transpose(beamtemp).mean(axis=1)
         sio.savemat(matfile,{'beam':beam})
@@ -289,9 +289,9 @@ if __name__ == '__main__':
         if DEBUG:
             print 'preparing raw data'
         datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+        #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
         files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
-        fseis, meanlat, meanlon, slats, slons, ntimes, dt = prep_beam(files,onebit=True,tempfilter=False)
+        fseis, meanlat, meanlon, slats, slons, ntimes, dt = prep_beam(files,onebit=False,tempfilter=True)
         if DEBUG:
             print 'calculating steering vector'
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
