@@ -18,17 +18,14 @@ rcParams = {'backend':'Agg'}
 DEBUG = True
 def prep_beam(nhours=1,fmax=10.,threshold_std=0.5,fftpower=7,freq_int=(0.02,0.4)):
     datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-    datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
     files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
     ntimes = int(round(24/nhours))
-    times = arange(0,24+nhours,nhours)
     step = nhours*3600*fmax
     fs = fmax/step
     freq = fmax/2.*arange(0,2**(fftpower-1))/2**(fftpower-1)
 
     ### initialise station no.s
-    ista = 0
-    Ista = 0
     stations = []
     slons = array([])
     slats = array([])
@@ -54,8 +51,8 @@ def prep_beam(nhours=1,fmax=10.,threshold_std=0.5,fftpower=7,freq_int=(0.02,0.4)
             ilow = j*step
             iup = (j+1)*step
             seisband[i,j,:] = seis0[ilow:iup]
-            seisband[i,j,:] -= seisband[i,:,j].mean()
-            seisband[i,j,:] = sign(seisband[i,j,:])
+            seisband[i,j,:] -= seisband[i,j,:].mean()
+            #seisband[i,j,:] = sign(seisband[i,j,:])
         fseis = fft(seisband,axis=2)
         if np.isnan(fseis).any():
             print "NaN found"
