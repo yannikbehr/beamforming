@@ -1,5 +1,5 @@
-#!/usr/local/python2/bin/python
-####/usr/bin/env mypython
+#!/usr/bin/env mypython
+###/usr/local/python2/bin/python
 """
 next try to rewrite laura's beamformer
 """
@@ -16,7 +16,6 @@ import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
 import pickle
-import ipdb
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'misc'))
 rcParams = {'backend':'Agg'}
 
@@ -57,6 +56,22 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True):
                 seisbande[i,j,:] = seis0e[ilow:iup]
                 seisbande[i,j,:] -= seisbande[i,j,:].mean()
 
+        if 1:
+            fftpower = 7
+            ismall = 2**fftpower
+            ipick = arange(ismall)
+            n=nhours*3600*df
+            nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
+            #seissmall = zeros((len(ipick),ntimes,nsub,nfiles))
+            seissmalln = zeros((nfiles,ntimes,nsub,len(ipick)))
+            seissmalle = zeros((nfiles,ntimes,nsub,len(ipick)))
+            for ii in xrange(nfiles):
+                for jj in xrange(ntimes):
+                    for kk in xrange(nsub):
+                        #seissmall[:,jj,kk,ii] = seisband[kk*ismall+ipick,jj,ii]
+                        seissmalln[ii,jj,kk,:] = seisbandn[ii,jj,kk*ismall+ipick]
+                        seissmalle[ii,jj,kk,:] = seisbande[ii,jj,kk*ismall+ipick]
+
         LonLref= 165
         LonUref= 179.9
         LatLref= -48
@@ -69,12 +84,12 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True):
         meanlat = slats.mean()
         meanlon = slons.mean()
 
-        sio.savemat(matfile,{'seisbandn':seisbandn,'seisbande':seisbande,'slats':slats,'slons':slons,'dt':dt})
-        return seisbandn, seisbande, meanlat, meanlon, slats, slons, dt
+        sio.savemat(matfile,{'seissmalln':seissmalln,'seissmalle':seissmalle,'slats':slats,'slons':slons,'dt':dt})
+        return seissmalln, seissmalle, meanlat, meanlon, slats, slons, dt
     else:
         a = sio.loadmat(matfile)
-        seisbandn = a['seisbandn']
-        seisbande = a['seisbande']
+        seissmalln = a['seissmalln']
+        seissmalle = a['seissmalle']
         slats = a['slats']
         slons = a['slons']
         dt = a['dt'][0][0]
@@ -82,7 +97,7 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True):
         slons = slons.reshape(slons.shape[0],)
         meanlat = slats.mean()
         meanlon = slons.mean()
-        return seisbandn, seisbande, meanlat, meanlon, slats, slons, dt
+        return seissmalln, seissmalle, meanlat, meanlon, slats, slons, dt
 
 
 def calc_steer(slats,slons):
@@ -140,9 +155,7 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_i
     if new:
         _p = 6.
         _f = 1./_p
-        nstat = seisn.shape[0]
-        ntimes = seisn.shape[1]
-        nfft = seisn.shape[2]
+        nstat, ntimes, nsub, nfft = seisn.shape
         nsources = theta.size
         freq = fftfreq(nfft,dt)
         I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
@@ -150,23 +163,35 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_i
         df = dt/nfft
         ind = int(_f/df)
         print ind, freq[ind]
-        for ww in [ind]:
-            FF = freq[ww]
-            for cc in xrange(slowness.shape[1]):
+        N = fft(seisn,n=nfft,axis=3)
+        E = fft(seise,n=nfft,axis=3)
+        for i,az in enumerate(theta):
+            daz = az*pi/180.
+            R = cos(daz)*N + sin(daz)*E
+            T = -sin(daz)*N + cos(daz)*E
+            dist = zetax[i,:]
+            for ww in [ind]:
+                FF = freq[ww]
                 omega = 2*pi*FF
-                velocity = 1./slowness[0][cc]*1000
-                e_steer=exp(-1j*zetax*omega/velocity)
-                for tt in xrange(ntimes):
-                #for tt in [0]:
-                    for i,az in enumerate(theta):
-                        r,t = rotate_fft(seisn,seise,az)
-                        Y = asmatrix(squeeze(r[:,tt,ww]))
-                        R = dot(Y.T,conjugate(Y))
-                        #ipdb.set_trace()
-                        temp = abs(asarray(dot(conjugate(e_steer[i,:].T),dot(R,e_steer[i,:]).T)))**2
-                        beam[i,cc,tt] = temp
+                for cc in xrange(slowness.shape[1]):
+                    velocity = 1./slowness[0][cc]*1000
+                    e = exp(-1j*dist*omega/velocity)
+                    eT = e.T.copy()
+                    #for tt in xrange(ntimes):
+                    for tt in [0]:
+                        #for TT in xrange(nsub):
+                        for TT in [0]:
+                            Y = asmatrix(squeeze(T[:,tt,TT,ww]))
+                            #Y = squeeze(R[:,tt,TT,ww])
+                            YT = Y.T.copy()
+                            cov = dot(YT,conjugate(Y))
+                            #import ipdb
+                            #ipdb.set_trace()
+                            #r,t = rotate_fft(seisn,seise,az)
+                            beam[i,cc,tt] = abs(asarray(dot(conjugate(eT),dot(cov,e).T)))**2
+                            #beam[i,cc,tt] = abs(dot(Y,conjugate(e)))**2
 
-        sio.savemat(matfile,{'beam':beam})
+        #sio.savemat(matfile,{'beam':beam})
     else:
         beam = sio.loadmat(matfile)['beam']
     return beam
@@ -196,13 +221,14 @@ def polar_plot(beam,theta,slowness):
 
 if __name__ == '__main__':
     datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
+    datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
     filesN = glob.glob(os.path.join(datdir,'ft_grid*.HHN.SAC'))
     filesE = glob.glob(os.path.join(datdir,'ft_grid*.HHE.SAC'))
-    matfile = 'prep_beam_h_2001_2_22.mat'
+    matfile = 'prep_beam_h_2001_3_3.mat'
     nlist = mkfilelist(filesN, filesE)
-    seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,nhours=1,fmax=10.,fact=10,new=True)
+    seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,nhours=1,fmax=10.,fact=10,new=False)
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
-    matfile = 'beam_h_2001_2_22.mat'
+    matfile = 'beam_h_2001_3_3.mat'
     beam = beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,freq_int=(0.01,0.4),
                        matfile=matfile)
     polar_plot(beam,theta,slowness)

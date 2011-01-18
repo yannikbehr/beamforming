@@ -1,5 +1,5 @@
-#!/usr/local/python2/bin/python
-####/usr/bin/env mypython
+#!/usr/bin/env mypython
+####/usr/local/python2/bin/python
 """
 next try to rewrite laura's beamformer
 """
@@ -16,7 +16,7 @@ import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
 import pickle
-#import ipdb
+import ipdb
 rcParams = {'backend':'Agg'}
 
 DEBUG = True
@@ -160,23 +160,24 @@ def beamforming(seis,slowness,zetax,nsources,dt,new=True,matfile=None,freq_int=(
             for cc in xrange(slowness.shape[1]):
                 omega = 2*pi*FF
                 velocity = 1./slowness[0][cc]*1000
-                e_steer=exp(-1j*zetax*omega/velocity).T
-                beamtemp = empty((len(theta),1))
+                e_steer=exp(-1j*zetax*omega/velocity)
+                e_steerT=e_steer.T.copy()
                 beamtemp = None
-                #for tt in xrange(ntimes):
-                for tt in [0]:
-                    #for TT in xrange(nsub):
-                    for TT in [0]:
+                for tt in xrange(ntimes):
+                #for tt in [0]:
+                    for TT in xrange(nsub):
+                    #for TT in [0]:
                         #Y = asmatrix(squeeze(seis[ww,tt,TT,:],))
-                        Y = asmatrix(squeeze(seis[:,tt,TT,ww],))
-                        R = dot(Y.T,conjugate(Y))
+                        Y = asmatrix(squeeze(seis[:,tt,TT,ww]))
+                        YT = Y.T.copy()
+                        R = dot(YT,conjugate(Y))
                         if beamtemp is None:
-                            beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+                            beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1))
                         else:
-                            beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))))
+                            beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1))))
 
                     beam[:,cc,tt,ww] = transpose(beamtemp).mean(axis=1)
-        sio.savemat(matfile,{'beam':beam})
+        #sio.savemat(matfile,{'beam':beam})
     else:
         beam = sio.loadmat(matfile)['beam']
     return beam
@@ -382,15 +383,15 @@ if __name__ == '__main__':
         #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
         files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
         matfile = 'prep_beam_2001_2_22.mat'
-        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=True)
+        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=False)
         if DEBUG:
             print 'calculating steering vector'
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
         if DEBUG:
             print 'beamforming'
-        beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
-        #beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=True,matfile='6s_average_beam.mat')
-        #polar_plot(beam,theta,slowness,resp=False)
+        #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
+        beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=True,matfile='6s_average_beam.mat')
+        polar_plot(beam,theta,slowness,resp=False)
     if 0:
         Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
