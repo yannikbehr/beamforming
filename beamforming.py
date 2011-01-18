@@ -1,4 +1,5 @@
-#!/usr/bin/env mypython
+#!/usr/local/python2/bin/python
+####/usr/bin/env mypython
 """
 next try to rewrite laura's beamformer
 """
@@ -16,21 +17,17 @@ from matplotlib import cm, rcParams
 rcParams = {'backend':'Agg'}
 
 DEBUG = True
-def prep_beam(nhours=1,fmax=10.,threshold_std=0.5,fftpower=7,freq_int=(0.02,0.4)):
-    datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
-    files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
+def prep_beam(files,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,tempfilter=False):
     ntimes = int(round(24/nhours))
     step = nhours*3600*fmax
     fs = fmax/step
-    freq = fmax/2.*arange(0,2**(fftpower-1))/2**(fftpower-1)
 
-    ### initialise station no.s
     stations = []
     slons = array([])
     slats = array([])
     nfiles = len(files)
     seisband = zeros((nfiles,ntimes,step))
+    sigmas = []
     for i,_f in enumerate(files):
         tr = read(_f)[0]
         staname = tr.stats.station
@@ -52,11 +49,36 @@ def prep_beam(nhours=1,fmax=10.,threshold_std=0.5,fftpower=7,freq_int=(0.02,0.4)
             iup = (j+1)*step
             seisband[i,j,:] = seis0[ilow:iup]
             seisband[i,j,:] -= seisband[i,j,:].mean()
-            #seisband[i,j,:] = sign(seisband[i,j,:])
-        fseis = fft(seisband,axis=2)
-        if np.isnan(fseis).any():
-            print "NaN found"
-            return
+            sigmas.append(seisband[i,j,:].std())
+            if onebit:
+                seisband[i,j,:] = sign(seisband[i,j,:])
+    if tempfilter:
+        sgm = ma.masked_equal(array(sigmas),0.).compressed()
+        sigma = sqrt(sum(sgm**2)/sgm.size)
+        threshold = threshold_std*sigma
+        seisband = where(abs(seisband) > threshold,threshold*sign(seisband),seisband)
+        seisband = apply_along_axis(lambda e: e-e.mean(),2,seisband)
+
+    if 1:
+        fftpower = 7
+        ismall = 2**fftpower
+        ipick = arange(ismall)
+        n=nhours*3600*fmax
+        nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
+        seissmall = zeros((nfiles,ntimes,nsub,len(ipick)))
+        for ii in xrange(nfiles):
+            for jj in xrange(ntimes):
+                for kk in xrange(nsub):
+                    seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]
+
+
+
+    fseis = fft(seisband,axis=2)
+    if np.isnan(fseis).any():
+        print "NaN found"
+        return
+
+                              
     LonLref= 165
     LonUref= 179.9
     LatLref= -48
@@ -266,7 +288,10 @@ if __name__ == '__main__':
     if 1:
         if DEBUG:
             print 'preparing raw data'
-        fseis, meanlat, meanlon, slats, slons, ntimes, dt = prep_beam()
+        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
+        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+        files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
+        fseis, meanlat, meanlon, slats, slons, ntimes, dt = prep_beam(files,onebit=True,tempfilter=False)
         if DEBUG:
             print 'calculating steering vector'
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
