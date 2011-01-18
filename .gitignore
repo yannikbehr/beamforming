@@ -9,3 +9,5 @@ test.ps
 Matfiles/*
 *.mat
 *.png
+*.dump
+*.nfs*
