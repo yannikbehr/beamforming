@@ -14,132 +14,99 @@ from pylab import *
 import obspy.signal
 import scipy.io as sio
 from matplotlib import cm, rcParams
+from ctypes import *
 rcParams = {'backend':'Agg'}
 
 DEBUG = True
-def prep_beam(files,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,tempfilter=False,fact=10):
-    ntimes = int(round(24/nhours))
-    step = nhours*3600*fmax/fact
+def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
+              tempfilter=False,fact=10,new=True):
+    if new:
+        ntimes = int(round(24/nhours))
+        step = nhours*3600*fmax/fact
 
-    stations = []
-    slons = array([])
-    slats = array([])
-    nfiles = len(files)
-    seisband = zeros((nfiles,ntimes,step))
-    sigmas = []
-    for i,_f in enumerate(files):
-        tr = read(_f)[0]
-        staname = tr.stats.station
-        kcomp = tr.stats.channel
-        slat = tr.stats.sac.stla
-        slon = tr.stats.sac.stlo
-        slons = append(slons,tr.stats.sac.stlo)
-        slats = append(slats,tr.stats.sac.stla)
-        if staname not in stations:
-            stations.append(staname)
-        tr.downsample(decimation_factor=fact, strict_length=True)
-        npts = tr.stats.npts
-        df = tr.stats.sampling_rate
-        dt = tr.stats.delta
-        seis0 = zeros(24*3600*int(df))
-        seis0[0:npts] = tr.data
-        seis0 -= seis0.mean()
-        for j in xrange(ntimes):
-            ilow = j*step
-            iup = (j+1)*step
-            seisband[i,j,:] = seis0[ilow:iup]
-            seisband[i,j,:] -= seisband[i,j,:].mean()
-            sigmas.append(seisband[i,j,:].std())
-            if onebit:
-                seisband[i,j,:] = sign(seisband[i,j,:])
-    if tempfilter:
-        sgm = ma.masked_equal(array(sigmas),0.).compressed()
-        sigma = sqrt(sum(sgm**2)/sgm.size)
-        threshold = threshold_std*sigma
-        seisband = where(abs(seisband) > threshold,threshold*sign(seisband),seisband)
-        seisband = apply_along_axis(lambda e: e-e.mean(),2,seisband)
+        stations = []
+        slons = array([])
+        slats = array([])
+        nfiles = len(files)
+        seisband = zeros((nfiles,ntimes,step))
+        sigmas = []
+        for i,_f in enumerate(files):
+            tr = read(_f)[0]
+            staname = tr.stats.station
+            kcomp = tr.stats.channel
+            slat = tr.stats.sac.stla
+            slon = tr.stats.sac.stlo
+            slons = append(slons,tr.stats.sac.stlo)
+            slats = append(slats,tr.stats.sac.stla)
+            if staname not in stations:
+                stations.append(staname)
+            tr.downsample(decimation_factor=fact, strict_length=True)
+            npts = tr.stats.npts
+            df = tr.stats.sampling_rate
+            dt = tr.stats.delta
+            seis0 = zeros(24*3600*int(df))
+            seis0[0:npts] = tr.data
+            seis0 -= seis0.mean()
+            for j in xrange(ntimes):
+                ilow = j*step
+                iup = (j+1)*step
+                seisband[i,j,:] = seis0[ilow:iup]
+                seisband[i,j,:] -= seisband[i,j,:].mean()
+                sigmas.append(seisband[i,j,:].std())
+                if onebit:
+                    seisband[i,j,:] = sign(seisband[i,j,:])
+        if tempfilter:
+            sgm = ma.masked_equal(array(sigmas),0.).compressed()
+            sigma = sqrt(sum(sgm**2)/sgm.size)
+            threshold = threshold_std*sigma
+            seisband = where(abs(seisband) > threshold,threshold*sign(seisband),seisband)
+            seisband = apply_along_axis(lambda e: e-e.mean(),2,seisband)
 
-    if 1:
-        fftpower = 7
-        ismall = 2**fftpower
-        ipick = arange(ismall)
-        n=nhours*3600*df
-        nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
-        seissmall = zeros((nfiles,ntimes,nsub,len(ipick)))
-        for ii in xrange(nfiles):
-            for jj in xrange(ntimes):
-                for kk in xrange(nsub):
-                    seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]
+        if 1:
+            fftpower = 7
+            ismall = 2**fftpower
+            ipick = arange(ismall)
+            n=nhours*3600*df
+            nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
+            seissmall = zeros((nfiles,ntimes,nsub,len(ipick)))
+            for ii in xrange(nfiles):
+                for jj in xrange(ntimes):
+                    for kk in xrange(nsub):
+                        seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]
 
-    fseis = fft(seissmall,n=2**fftpower,axis=3)
-    if np.isnan(fseis).any():
-        print "NaN found"
-        return
-
-                              
-    LonLref= 165
-    LonUref= 179.9
-    LatLref= -48
-    LatUref= -34
-    stacoord=vstack((slons,slats))
-    ##Find the stations which belong to this grid
-    idx = where((stacoord[0] >= LonLref) & (stacoord[0] <= LonUref) & \
-                (stacoord[1] >= LatLref) & (stacoord[1] <= LatUref))
-    #nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
-    meanlat = slats.mean()
-    meanlon = slons.mean()
-
-    return fseis, meanlat, meanlon, slats, slons, ntimes, dt
+        fseis = fft(seissmall,n=2**fftpower,axis=3)
+        if np.isnan(fseis).any():
+            print "NaN found"
+            return
 
 
-def read_matfiles():
-    year=2001
-    sacpath = './START_DATA_TEST/'
-    matpath = './Matfiles_start_TEST/'
-    JulianDay=88
-    JD='88'
-    beamdict = sio.loadmat('BeamformInputData_test.mat')
-    infom = beamdict['infom']
-    I = beamdict['I']
-    matpath = beamdict['matpath']
-    matpath = [u'./Matfiles_test']
-    Nsub = beamdict['Nsub']
-    Ntimes = beamdict['Ntimes']
-    freq = beamdict['freq']
-    slons = array([])
-    slats = array([])
-    for i in infom[0]:
-        slons = append(slons,i.slon)
-        slats = append(slats,i.slat)
+        LonLref= 165
+        LonUref= 179.9
+        LatLref= -48
+        LatUref= -34
+        stacoord=vstack((slons,slats))
+        ##Find the stations which belong to this grid
+        idx = where((stacoord[0] >= LonLref) & (stacoord[0] <= LonUref) & \
+                    (stacoord[1] >= LatLref) & (stacoord[1] <= LatUref))
+        #nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
+        meanlat = slats.mean()
+        meanlon = slons.mean()
 
-    LonLref= 165
-    LonUref= 179.9
-    LatLref= -48
-    LatUref= -34
-    stacoord=vstack((slons,slats))
-    ##Find the stations which belong to this grid
-    idx = where((stacoord[0] >= LonLref) & (stacoord[0] <= LonUref) & \
-                (stacoord[1] >= LatLref) & (stacoord[1] <= LatUref))
-    #nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
-    meanlat = slats.mean()
-    meanlon = slons.mean()
-
-    Nfreq = I.size;
-    seis1 = zeros((Nfreq,Nsub,Ntimes,idx[0].size),'complex128')
-    ic = 0
-    for ista in xrange(idx[0].size):
-        sta1 = infom[0][ista].staname
-        filename = os.path.join(matpath[0],sta1[0]+JD+'.mat')
-        if not os.path.isfile(filename):
-            print filename, ' did not exist'
-            continue
-        fseis = sio.loadmat(filename)['fseis']
-        seis1[:,:,:,ic] = fseis
-        ic += 1
-    #frequencies within our range of interest
-    freqs = freq[0][I-1]
-    return Ntimes, freqs, slons, slats, seis1,meanlat,meanlon
-
+        sio.savemat(matfile,{'fseis':fseis,'seissmall':seissmall,'slats':slats,'slons':slons,'dt':dt})
+        return fseis, meanlat, meanlon, slats, slons, dt, seissmall
+    else:
+        a = sio.loadmat(matfile)
+        fseis = a['fseis']
+        seissmall = a['seissmall']
+        slats = a['slats']
+        slons = a['slons']
+        dt = a['dt'][0][0]
+        slats = slats.reshape(slats.shape[0],)
+        slons = slons.reshape(slons.shape[0],)
+        meanlat = slats.mean()
+        meanlon = slons.mean()
+        return fseis, meanlat, meanlon, slats, slons, dt, seissmall
+        
 
 def calc_steer(slats,slons):
     theta= arange(0,362,2)
@@ -165,15 +132,14 @@ def calc_steer(slats,slons):
 
 
 
-def beamforming(seis1,slowness,zetax,nsources,Ntimes,dt,new=True,matfile=None,freq_int=(0.02,0.4)):
+def beamforming(seis1,slowness,zetax,nsources,dt,new=True,matfile=None,freq_int=(0.02,0.4)):
     if new:
         _p = 6.
         _f = 1./_p
         freq = fftfreq(seis1.shape[3],dt)
-        print freq
         ind = searchsorted(freq[0:int(seis1.shape[3]/2)],_f,side='left')
         I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
-        beam = zeros((nsources,slowness.size,Ntimes))
+        beam = zeros((nsources,slowness.size,seis1.shape[1]))
         ind = 21
         print ind, freq[ind]
         for ww in [ind]:
@@ -199,6 +165,43 @@ def beamforming(seis1,slowness,zetax,nsources,Ntimes,dt,new=True,matfile=None,fr
         beam = sio.loadmat(matfile)['beam']
     return beam
 
+
+def beamforming_c(seis1,seissmall,slowness,zetax,nsources,dt,new=True,
+                  matfile=None,freq_int=(0.02,0.4)):
+    #int beam(double *traces, int stride1, int stride2, int stride3, int stride4, 
+    #	 int nfft, int digfreq, double flow, double fhigh){
+    lib = cdll.LoadLibrary('./beam_c.so')
+    st1, st2, st3, st4 = seissmall.strides
+    digfreq = int(round(1./dt))
+    lib.beam.argtypes = [ \
+        POINTER(c_double),
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_double,
+        c_double
+        ]
+    nstat,ntimes,nsub,nfft = seissmall.shape
+    print zetax.shape
+    ffttest = zeros(nfft)
+    errcode = lib.beam(seissmall.ctypes.data_as(POINTER(c_double)),st1,st2,
+                       st3,st4,nfft,nstat,ntimes,nsub,digfreq,freq_int[0],freq_int[1])
+    #power = []
+    #for i in xrange(nfft/2):
+    #    re = ffttest[2*i]
+    #    im = ffttest[2*i+1]
+    #    power.append(sqrt(re*re+im*im))
+    #freq = fftfreq(2*len(power),1.)
+    #plot(freq[0:len(power)],power)
+    #plot(freq[0:len(power)],abs(fft(seissmall[0,0,0,:],n=nfft)[0:len(power)]))
+    #show()
+    
 def arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
              new=True,matfile=None,src=False,fout=None,pplot=True):
     """
@@ -291,14 +294,16 @@ if __name__ == '__main__':
         datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
         #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
         files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
-        fseis, meanlat, meanlon, slats, slons, ntimes, dt = prep_beam(files,onebit=False,tempfilter=True)
+        matfile = 'prep_beam_2001_2_22.mat'
+        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=False)
         if DEBUG:
             print 'calculating steering vector'
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
         if DEBUG:
             print 'beamforming'
-        beam = beamforming(fseis,slowness,zetax,theta.size,ntimes,dt,new=True,matfile='6s_average_beam.mat')
-        polar_plot(beam,theta,slowness,resp=False)
+        beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,new=True,matfile='6s_average_beam.mat')
+        #beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=True,matfile='6s_average_beam.mat')
+        #polar_plot(beam,theta,slowness,resp=False)
     if 0:
         Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
