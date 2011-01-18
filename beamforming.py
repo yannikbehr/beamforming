@@ -8,11 +8,72 @@ import sys
 import glob
 import obspy.sac
 from obspy.sac import *
+from obspy.core import read
 from pylab import *
-from obspy.signal import rotate
+import obspy.signal
 import scipy.io as sio
 from matplotlib import cm, rcParams
 rcParams = {'backend':'Agg'}
+
+DEBUG = True
+def prep_beam(nhours=1,fmax=10.,threshold_std=0.5,fftpower=7,freq_int=(0.02,0.4)):
+    datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
+    datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+    files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
+    ntimes = int(round(24/nhours))
+    times = arange(0,24+nhours,nhours)
+    step = nhours*3600*fmax
+    fs = fmax/step
+    freq = fmax/2.*arange(0,2**(fftpower-1))/2**(fftpower-1)
+
+    ### initialise station no.s
+    ista = 0
+    Ista = 0
+    stations = []
+    slons = array([])
+    slats = array([])
+    nfiles = len(files)
+    seisband = zeros((nfiles,ntimes,step))
+    for i,_f in enumerate(files):
+        tr = read(_f)[0]
+        staname = tr.stats.station
+        kcomp = tr.stats.channel
+        slat = tr.stats.sac.stla
+        slon = tr.stats.sac.stlo
+        slons = append(slons,tr.stats.sac.stlo)
+        slats = append(slats,tr.stats.sac.stla)
+        df = tr.stats.sampling_rate
+        dt = tr.stats.delta
+        if staname not in stations:
+            stations.append(staname)
+        npts = tr.stats.npts
+        seis0 = zeros(24*3600*int(df))
+        seis0[0:npts] = tr.data
+        seis0 -= seis0.mean()
+        for j in xrange(ntimes):
+            ilow = j*step
+            iup = (j+1)*step
+            seisband[i,j,:] = seis0[ilow:iup]
+            seisband[i,j,:] -= seisband[i,:,j].mean()
+            seisband[i,j,:] = sign(seisband[i,j,:])
+        fseis = fft(seisband,axis=2)
+        if np.isnan(fseis).any():
+            print "NaN found"
+            return
+    LonLref= 165
+    LonUref= 179.9
+    LatLref= -48
+    LatUref= -34
+    stacoord=vstack((slons,slats))
+    ##Find the stations which belong to this grid
+    idx = where((stacoord[0] >= LonLref) & (stacoord[0] <= LonUref) & \
+                (stacoord[1] >= LatLref) & (stacoord[1] <= LatUref))
+    #nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
+    meanlat = slats.mean()
+    meanlon = slons.mean()
+
+    return fseis, meanlat, meanlon, slats, slons, ntimes, dt
+
 
 def read_matfiles():
     year=2001
@@ -69,7 +130,7 @@ def calc_steer(slats,slons):
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
     for lat,lon in zip(slats,slons):
-        dist, az, baz = rotate.gps2DistAzimuth(meanlat,meanlon,lat,lon)
+        dist, az, baz = obspy.signal.rotate.gps2DistAzimuth(meanlat,meanlon,lat,lon)
         sta_origin_dist = append(sta_origin_dist,dist)
         sta_origin_bearing = append(sta_origin_bearing,az)
     sta_origin_x = sta_origin_dist*cos(sta_origin_bearing*pi/180.)
@@ -87,11 +148,17 @@ def calc_steer(slats,slons):
 
 
 
-def beamforming(seis1,freqs,slowness,zetax,nsources,Ntimes,new=True,matfile=None):
+def beamforming(seis1,slowness,zetax,nsources,Ntimes,dt,new=True,matfile=None,freq_int=(0.02,0.4)):
     if new:
-        beam = zeros((nsources,freqs.size,slowness.size,Ntimes))
-        for ww in [18]:
-            FF = freqs[0][ww]
+        _p = 6.
+        _f = 1./_p
+        freq = fftfreq(seis1.shape[2],dt)
+        ind = searchsorted(freq[0:int(seis1.shape[2]/2)],_f)
+        I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
+        beam = zeros((nsources,slowness.size,Ntimes))
+        print ind, freq[ind]
+        for ww in [ind]:
+            FF = freq[ww]
             for cc in xrange(slowness.shape[1]):
                 omega = 2*pi*FF
                 velocity = 1./slowness[0][cc]*1000
@@ -99,15 +166,15 @@ def beamforming(seis1,freqs,slowness,zetax,nsources,Ntimes,new=True,matfile=None
                 beamtemp = empty((len(theta),1))
                 beamtemp = None
                 for tt in xrange(Ntimes):
-                    for TT in xrange(seis1.shape[1]):
-                        Y = asmatrix(squeeze(seis1[ww,TT,tt,:],))
-                        R = dot(Y.T,conjugate(Y))
-                        if beamtemp is None:
-                            beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
-                        else:
-                            beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))))
+                    #for TT in xrange(seis1.shape[1]):
+                    Y = asmatrix(squeeze(seis1[:,tt,ww],))
+                    R = dot(Y.T,conjugate(Y))
+                    if beamtemp is None:
+                        beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+                    else:
+                        beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))))
 
-                    beam[:,ww,cc,tt] = transpose(beamtemp).mean(axis=1)
+                    beam[:,cc,tt] = transpose(beamtemp).mean(axis=1)
         sio.savemat(matfile,{'beam':beam})
     else:
         beam = sio.loadmat(matfile)['beam']
@@ -175,7 +242,8 @@ def polar_plot(beam,theta,slowness,resp=False):
     if resp:
         tre = squeeze(beam[:,18,:])
     else:
-        tre = squeeze(beam[:,18,:,:])
+        #tre = squeeze(beam[:,18,:,:])
+        tre = beam
         tre = tre.mean(axis=2)
     tre = tre-tre.max()
     idx = where((slowness>0.2) & (slowness<0.4))
@@ -198,12 +266,23 @@ def polar_plot(beam,theta,slowness,resp=False):
     show()
 
 if __name__ == '__main__':
-    Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
-    zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+    if 1:
+        if DEBUG:
+            print 'preparing raw data'
+        fseis, meanlat, meanlon, slats, slons, ntimes, dt = prep_beam()
+        if DEBUG:
+            print 'calculating steering vector'
+        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+        if DEBUG:
+            print 'beamforming'
+        beam = beamforming(fseis,slowness,zetax,theta.size,ntimes,dt,new=True,matfile='6s_average_beam.mat')
+        polar_plot(beam,theta,slowness,resp=False)
     if 0:
+        Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
+        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
         beam = beamforming(seis,freqs,slowness,zetax,theta.size,Ntimes,new=False,matfile='6s_average_beam.mat')
         polar_plot(beam,theta,slowness,resp=True)
-    if 1:
+    if 0:
         arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
                  matfile='array_response_start.mat',new=False,src=True,
                  fout='array_response_start.pdf')
