@@ -1,5 +1,4 @@
 #!/usr/bin/env mypython
-###/usr/local/python2/bin/python
 """
 next try to rewrite laura's beamformer
 """
@@ -17,9 +16,10 @@ from matplotlib import cm, rcParams
 import ctypes as C
 import pickle
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'misc'))
+import progressbar as pg
 rcParams = {'backend':'Agg'}
 
-DEBUG = True
+DEBUG = False
 def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True):
     if new:
         ntimes = int(round(24/nhours))
@@ -151,56 +151,73 @@ def rotate_fft(seisbandn,seisbande,az):
     T= fft(t,axis=2)
     return R,T
 
-def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_int=(0.02,0.4)):
+def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_int=(0.1,0.4)):
     if new:
+        if not DEBUG:
+            widgets = ['horizontal beamforming: ', pg.Percentage(), ' ', pg.Bar('#'),
+                       ' ', pg.ETA()]
+            pbar = pg.ProgressBar(widgets=widgets, maxval=theta.size).start()
         _p = 6.
         _f = 1./_p
         nstat, ntimes, nsub, nfft = seisn.shape
         nsources = theta.size
         freq = fftfreq(nfft,dt)
         I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
-        beam = zeros((nsources,slowness.size,ntimes))
+        beamr = zeros((nsources,slowness.size,ntimes,nfft))
+        beamt = zeros((nsources,slowness.size,ntimes,nfft))
         df = dt/nfft
         ind = int(_f/df)
-        print ind, freq[ind]
+        if DEBUG:
+            print ind, freq[ind]
         N = fft(seisn,n=nfft,axis=3)
         E = fft(seise,n=nfft,axis=3)
         for i,az in enumerate(theta):
+            if not DEBUG:
+                pbar.update(i)
             daz = az*pi/180.
             R = cos(daz)*N + sin(daz)*E
             T = -sin(daz)*N + cos(daz)*E
             dist = zetax[i,:]
-            for ww in [ind]:
+            #for ww in [ind]:
+            for ww in I[0]:
                 FF = freq[ww]
                 omega = 2*pi*FF
                 for cc in xrange(slowness.shape[1]):
                     velocity = 1./slowness[0][cc]*1000
                     e = exp(-1j*dist*omega/velocity)
                     eT = e.T.copy()
-                    #for tt in xrange(ntimes):
-                    for tt in [0]:
-                        #for TT in xrange(nsub):
-                        for TT in [0]:
-                            Y = asmatrix(squeeze(T[:,tt,TT,ww]))
+                    for tt in xrange(ntimes):
+                    #for tt in [0]:
+                        for TT in xrange(nsub):
+                        #for TT in [0]:
+                            Yt = asmatrix(squeeze(T[:,tt,TT,ww]))
+                            Yr = asmatrix(squeeze(R[:,tt,TT,ww]))
                             #Y = squeeze(R[:,tt,TT,ww])
-                            YT = Y.T.copy()
-                            cov = dot(YT,conjugate(Y))
+                            YtT = Yt.T.copy()
+                            YrT = Yr.T.copy()
+                            covr = dot(YrT,conjugate(Yr))
+                            covt = dot(YtT,conjugate(Yt))
                             #import ipdb
                             #ipdb.set_trace()
                             #r,t = rotate_fft(seisn,seise,az)
-                            beam[i,cc,tt] = abs(asarray(dot(conjugate(eT),dot(cov,e).T)))**2
+                            beamr[i,cc,tt,ww] += (abs(asarray(dot(conjugate(eT),dot(covr,e).T)))**2)/nsub
+                            beamt[i,cc,tt,ww] += (abs(asarray(dot(conjugate(eT),dot(covt,e).T)))**2)/nsub
                             #beam[i,cc,tt] = abs(dot(Y,conjugate(e)))**2
-
-        #sio.savemat(matfile,{'beam':beam})
+        if not DEBUG:
+            pbar.finish()
+        sio.savemat(matfile,{'beamr':beamr,'beamt':beamt})
     else:
-        beam = sio.loadmat(matfile)['beam']
-    return beam
+        a = sio.loadmat(matfile)
+        beamr = a['beamr']
+        beamt = a['beamt']
+    return beamr, beamt
 
 
 def polar_plot(beam,theta,slowness):
     theta = theta[:,0]
     slowness = slowness[0,:]
-    tre = squeeze(beam[:,:,0])
+    tre = squeeze(beam[:,:,:,21])
+    tre = tre.mean(axis=2)
     tre = tre-tre.max()
     fig = figure(figsize=(6,6))
     ax = fig.add_subplot(1,1,1,projection='polar')
@@ -216,20 +233,23 @@ def polar_plot(beam,theta,slowness):
     ax.grid(True)
     #ax.set_title(os.path.basename(_d))
     ax.set_rmax(0.5)
-    show()
 
 
 if __name__ == '__main__':
     datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-    datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
     filesN = glob.glob(os.path.join(datdir,'ft_grid*.HHN.SAC'))
     filesE = glob.glob(os.path.join(datdir,'ft_grid*.HHE.SAC'))
-    matfile = 'prep_beam_h_2001_3_3.mat'
+    matfile = 'prep_beam_h_2001_2_22.mat'
     nlist = mkfilelist(filesN, filesE)
-    seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,nhours=1,fmax=10.,fact=10,new=False)
+    seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,
+                                                                   nhours=1,fmax=10.,fact=10,new=True)
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
-    matfile = 'beam_h_2001_3_3.mat'
-    beam = beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,freq_int=(0.01,0.4),
-                       matfile=matfile)
-    polar_plot(beam,theta,slowness)
+    matfile = 'beam_h_2001_2_22.mat'
+    beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,
+                              new=True,freq_int=(0.1,0.4),matfile=matfile)
+    if 10:
+        polar_plot(beamr,theta,slowness)
+        polar_plot(beamt,theta,slowness)
+        show()
     
