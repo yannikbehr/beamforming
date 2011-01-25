@@ -16,10 +16,11 @@ import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
 import pickle
-import ipdb
+sys.path.append(os.path.join(os.environ['PROC_SRC'],'misc'))
+import progressbar as pg
 rcParams = {'backend':'Agg'}
 
-DEBUG = True
+DEBUG = False
 def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
               tempfilter=False,fact=10,new=True):
     if new:
@@ -120,7 +121,8 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
 
 
 def calc_steer(slats,slons):
-    theta= arange(0,362,2)
+    #theta= arange(0,362,2)
+    theta= arange(0,365,5)
     theta = theta.reshape((theta.size,1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
@@ -137,7 +139,8 @@ def calc_steer(slats,slons):
     #dot product betwen zeta and x
     zetax = zeta_x*sta_origin_x+zeta_y*sta_origin_y
     #slowness in s/km
-    slowness = arange(0.03,0.505,0.005)
+    #slowness = arange(0.03,0.505,0.005)
+    slowness = arange(0.125,0.51,0.01)
     slowness = slowness.reshape((1,slowness.size))
     return zetax,theta,slowness,sta_origin_x,sta_origin_y
 
@@ -145,39 +148,41 @@ def calc_steer(slats,slons):
 
 def beamforming(seis,slowness,zetax,nsources,dt,new=True,matfile=None,freq_int=(0.02,0.4)):
     if new:
-        _p = 6.
-        _f = 1./_p
+        periods = arange(4.,11.)
+        #periods = array([6.])
         #nfft,ntimes,nsub,nstat = seis.shape
         nstat,ntimes,nsub,nfft = seis.shape
         freq = fftfreq(nfft,dt)
-        I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
         beam = zeros((nsources,slowness.size,ntimes,nfft))
         df = dt/nfft
-        ind = int(_f/df)
-        print ind, freq[ind]
-        for ww in [ind]:
+        idx = [int(1./(p*df)) for p in periods]
+        if not DEBUG:
+            widgets = ['vertical beamforming: ', pg.Percentage(), ' ', pg.Bar('#'),
+                       ' ', pg.ETA()]
+            pbar = pg.ProgressBar(widgets=widgets, maxval=len(idx)*ntimes).start()
+            count = 0
+        for ww in idx:
             FF = freq[ww]
-            for cc in xrange(slowness.shape[1]):
-                omega = 2*pi*FF
-                velocity = 1./slowness[0][cc]*1000
-                e_steer=exp(-1j*zetax*omega/velocity)
-                e_steerT=e_steer.T.copy()
-                beamtemp = None
-                for tt in xrange(ntimes):
-                #for tt in [0]:
-                    for TT in xrange(nsub):
-                    #for TT in [0]:
-                        #Y = asmatrix(squeeze(seis[ww,tt,TT,:],))
-                        Y = asmatrix(squeeze(seis[:,tt,TT,ww]))
-                        YT = Y.T.copy()
-                        R = dot(YT,conjugate(Y))
-                        if beamtemp is None:
-                            beamtemp = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1))
-                        else:
-                            beamtemp = vstack((beamtemp,atleast_2d(sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1))))
-
-                    beam[:,cc,tt,ww] = transpose(beamtemp).mean(axis=1)
-        #sio.savemat(matfile,{'beam':beam})
+            for tt in xrange(ntimes):
+                if not DEBUG:
+                    count +=1
+                    pbar.update(count)
+            #for tt in [0]:
+                for TT in xrange(nsub):
+                #for TT in [0]:
+                    #Y = asmatrix(squeeze(seis[ww,tt,TT,:],))
+                    Y = asmatrix(squeeze(seis[:,tt,TT,ww]))
+                    YT = Y.T.copy()
+                    R = dot(YT,conjugate(Y))
+                    for cc in xrange(slowness.shape[1]):
+                        omega = 2*pi*FF
+                        velocity = 1./slowness[0][cc]*1000
+                        e_steer=exp(-1j*zetax*omega/velocity)
+                        e_steerT=e_steer.T.copy()
+                        beam[:,cc,tt,ww] += sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
+        if not DEBUG:
+            pbar.finish()
+        sio.savemat(matfile,{'beam':beam})
     else:
         beam = sio.loadmat(matfile)['beam']
     return beam
@@ -362,10 +367,10 @@ def polar_plot(beam,theta,slowness,resp=False):
     fig = figure(figsize=(6,6))
     ax = fig.add_subplot(1,1,1,projection='polar')
     cmap = cm.get_cmap('jet')
-    ax.contourf((theta[::-1]+90.)*pi/180.,slowness[14:],tre[:,14:].T,
+    ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
                 100,cmap=cmap,antialiased=True,
                 linewidths=0.1,linstyles='dotted')
-    ax.contour((theta[::-1]+90.)*pi/180.,slowness[14:],tre[:,14:].T,
+    ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
                 100,cmap=cmap)
     ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
                       labels=['90','45','0','315','270','225','180','135'])
@@ -375,8 +380,143 @@ def polar_plot(beam,theta,slowness,resp=False):
     ax.set_rmax(0.5)
     show()
 
-if __name__ == '__main__':
+def polar_plot_test(beam,theta,slowness,resp=False):
+    periods = arange(4.,11.)
+    nfft = 128
+    dt = 1.0
+    df = dt/nfft
+    idx = [int(1./(p*df)) for p in periods]
+    theta = theta[:,0]
+    slowness = slowness[0,:]
+    p = []
+    c = []
+    cmax = []
+    cerr = []
+    for ind in idx:
+        if 0:
+            tre = squeeze(beam[:,:,:,ind])
+            tre = tre-tre.max()
+            fig = figure(figsize=(6,6))
+            ax = fig.add_subplot(1,1,1,projection='polar')
+            cmap = cm.get_cmap('jet')
+            ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                        100,cmap=cmap,antialiased=True,
+                        linewidths=0.1,linstyles='dotted')
+            ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                       100,cmap=cmap)
+            ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                              labels=['90','45','0','315','270','225','180','135'])
+            ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+            ax.set_title(str(1./(ind*df)))
+            ax.grid(True)
+            ax.set_rmax(0.5)
+        p.append(1./(ind*df))
+        c.append(mean(1./slowness[beam[:,:,0,ind].argmax(axis=1)]))
+        cmax.append(mean(1./slowness[beam[45,:,0,ind].argmax()]))
+        cerr.append(std(1./slowness[beam[:,:,0,ind].argmax(axis=1)]))
+
+    figure()
+    errorbar(p,c,yerr=cerr)
+    plot(p,cmax,'k--')
+    xmin, xmax = xlim()
+    model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+             '2.  3.4 2.0 2.3 100. 200.\n',
+             '5.  6.5 3.8 2.5 100. 200.\n',
+             '0.  8.0 4.7 3.3 500. 900.\n']
+    rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
+    rayu,lovu = get_disp(model,0.02,1.0,gv=True)
+    indlc = where(lovc[:,0] > 0.)
+    indrc = where(rayc[:,0] > 0.)
+    indlu = where(lovu[:,0] > 0.)
+    indru = where(rayu[:,0] > 0.)
     if 1:
+        plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
+        xlabel('Period [s]')
+        ylabel('Velocity [km/s]')
+        legend(loc='lower right')
+        xlim(xmin,xmax)
+    show()
+
+
+def syntrace(dist,wtype='rayleigh'):
+    model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+             '2.  3.4 2.0 2.3 100. 200.\n',
+             '5.  6.5 3.8 2.5 100. 200.\n',
+             '0.  8.0 4.7 3.3 500. 900.\n']
+    rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
+    rayu,lovu = get_disp(model,0.02,1.0,gv=True)
+    indlc = where(lovc[:,0] > 0.)
+    indrc = where(rayc[:,0] > 0.)
+    indlu = where(lovu[:,0] > 0.)
+    indru = where(rayu[:,0] > 0.)
+    if 0:
+        plot(1./lovc[indlc,0][0],1./lovc[indlc,1][0],label='Love phase')
+        plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
+        plot(1./lovu[indlu,0][0],1./lovu[indlu,1][0],label='Love group')
+        plot(1./rayu[indru,0][0],1./rayu[indru,1][0],label='Rayleigh group')
+        xlabel('Period [s]')
+        ylabel('Velocity [km/s]')
+        legend(loc='lower right')
+
+
+    ################# calculate a synthetic seismogram by summing the
+    ################# contributions of wavepackages centered around
+    ################# frequency intervals of 0.01 Hz from 0 to 1 Hz
+    df = 0.01
+    fint = arange(0.02,1.01,0.01)
+    if wtype == 'rayleigh':
+        frc = rayc[indrc,0][0]
+        fru = rayu[indru,0][0]
+        c = 1./rayc[indrc,1][0]
+        u = 1./rayu[indru,1][0]
+    elif wtype == 'love':
+        frc = lovc[indlc,0][0]
+        fru = lovu[indlu,0][0]
+        c = 1./lovc[indlc,1][0]
+        u = 1./lovu[indlu,1][0]
+    else:
+        print "incorrect wave type [rayleigh or love]"
+    dom = 2*pi*df
+    om0 = 0.005+fint[:-1]*2*pi
+    om0 = fint*2*pi
+    x = dist
+    t = linspace(80,208,128)
+    repc = scint.splrep(2*pi*frc,c)
+    repu = scint.splrep(2*pi*fru,u)
+    fsum = 0
+
+    for _w in om0:
+        y = dom/2.*(t-(x/scint.splev(_w,repu)))
+        f0 = dom/pi*sin(y)/y*cos(_w*t-_w*x/scint.splev(_w,repc))
+        fsum += f0
+
+    return t,fsum
+
+def syntest(theta,zetax):
+    dtheta = int(unique(diff(theta[:,0])))
+    ind = int(round(225/dtheta))
+    nsources, nstations = zetax.shape
+    traces = zeros((nstations,1,1,128))
+    for i,ddiff in enumerate(zetax[ind,:]/1000.):
+        t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
+        traces[i,0,0,:] = fsum
+    if 0:
+        figure()
+        for i in xrange(10):
+            plot(t,traces[i,0,0,:])
+            xlabel('Time [s]')
+            title('Figure E')
+    fseis = fft(traces,n=128,axis=3)
+    if np.isnan(fseis).any():
+        print "NaN found"
+        return
+
+    return fseis
+    
+    return 1
+
+if __name__ == '__main__':
+    if 0:
         if DEBUG:
             print 'preparing raw data'
         datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
@@ -390,7 +530,7 @@ if __name__ == '__main__':
         if DEBUG:
             print 'beamforming'
         #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
-        beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=True,matfile='6s_average_beam.mat')
+        beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=False,matfile='6s_average_beam.mat')
         polar_plot(beam,theta,slowness,resp=False)
     if 0:
         Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
@@ -402,3 +542,16 @@ if __name__ == '__main__':
         arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
                  matfile='array_response_start.mat',new=False,src=True,
                  fout='array_response_start.pdf')
+
+
+    if 1:
+        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
+        #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+        files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
+        matfile = 'prep_beam_2001_2_22.mat'
+        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=False)
+        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+        fseis = syntest(theta,zetax)
+        dt = 1.0
+        beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=True,matfile='test_beam.mat')
+        polar_plot_test(beam,theta,slowness,resp=False)

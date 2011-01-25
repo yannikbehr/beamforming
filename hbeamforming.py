@@ -1,6 +1,6 @@
 #!/usr/bin/env mypython
 """
-next try to rewrite laura's beamformer
+Horizontal beamforming
 """
 
 import os
@@ -15,7 +15,10 @@ import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
 import pickle
+import scipy.interpolate as scint
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'misc'))
+sys.path.append(os.path.join(os.environ['PROC_SRC'],'NA'))
+from dinver_run import get_disp
 import progressbar as pg
 rcParams = {'backend':'Agg'}
 
@@ -101,7 +104,8 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True):
 
 
 def calc_steer(slats,slons):
-    theta= arange(0,362,2)
+    #theta= arange(0,362,2)
+    theta= arange(0,365,5)
     theta = theta.reshape((theta.size,1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
@@ -118,7 +122,8 @@ def calc_steer(slats,slons):
     #dot product betwen zeta and x
     zetax = zeta_x*sta_origin_x+zeta_y*sta_origin_y
     #slowness in s/km
-    slowness = arange(0.03,0.505,0.005)
+    #slowness = arange(0.03,0.505,0.005)
+    slowness = arange(0.125,0.51,0.01)
     slowness = slowness.reshape((1,slowness.size))
     return zetax,theta,slowness,sta_origin_x,sta_origin_y
 
@@ -140,16 +145,77 @@ def mkfilelist(filesN, filesE):
             
     return newlist
 
-def rotate_fft(seisbandn,seisbande,az):
-    """
-    Rotate traces into radial direction and calculate fft of radial trace.
-    """
-    az *= pi/180.
-    r = cos(az)*seisbandn + sin(az)*seisbande
-    t = -sin(az)*seisbandn + cos(az)*seisbande
-    R = fft(r,axis=2)
-    T= fft(t,axis=2)
-    return R,T
+def syntrace(dist,wtype='rayleigh'):
+    model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+             '2.  3.4 2.0 2.3 100. 200.\n',
+             '5.  6.5 3.8 2.5 100. 200.\n',
+             '0.  8.0 4.7 3.3 500. 900.\n']
+    rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
+    rayu,lovu = get_disp(model,0.02,1.0,gv=True)
+    indlc = where(lovc[:,0] > 0.)
+    indrc = where(rayc[:,0] > 0.)
+    indlu = where(lovu[:,0] > 0.)
+    indru = where(rayu[:,0] > 0.)
+    if 0:
+        plot(1./lovc[indlc,0][0],1./lovc[indlc,1][0],label='Love phase')
+        plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
+        plot(1./lovu[indlu,0][0],1./lovu[indlu,1][0],label='Love group')
+        plot(1./rayu[indru,0][0],1./rayu[indru,1][0],label='Rayleigh group')
+        xlabel('Period [s]')
+        ylabel('Velocity [km/s]')
+        legend(loc='lower right')
+
+
+    ################# calculate a synthetic seismogram by summing the
+    ################# contributions of wavepackages centered around
+    ################# frequency intervals of 0.01 Hz from 0 to 1 Hz
+    df = 0.01
+    fint = arange(0.02,1.01,0.01)
+    if wtype == 'rayleigh':
+        frc = rayc[indrc,0][0]
+        fru = rayu[indru,0][0]
+        c = 1./rayc[indrc,1][0]
+        u = 1./rayu[indru,1][0]
+    elif wtype == 'love':
+        frc = lovc[indlc,0][0]
+        fru = lovu[indlu,0][0]
+        c = 1./lovc[indlc,1][0]
+        u = 1./lovu[indlu,1][0]
+    else:
+        print "incorrect wave type [rayleigh or love]"
+    dom = 2*pi*df
+    om0 = 0.005+fint[:-1]*2*pi
+    om0 = fint*2*pi
+    x = dist
+    t = linspace(80,208,128)
+    repc = scint.splrep(2*pi*frc,c)
+    repu = scint.splrep(2*pi*fru,u)
+    fsum = 0
+
+    for _w in om0:
+        y = dom/2.*(t-(x/scint.splev(_w,repu)))
+        f0 = dom/pi*sin(y)/y*cos(_w*t-_w*x/scint.splev(_w,repc))
+        fsum += f0
+
+    return t,fsum
+
+def syntest(theta,zetax):
+    dtheta = int(unique(diff(theta[:,0])))
+    ind = int(round(225/dtheta))
+    nsources, nstations = zetax.shape
+    traces = zeros((nstations,1,1,128))
+    for i,ddiff in enumerate(zetax[ind,:]/1000.):
+        t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
+        traces[i,0,0,:] = fsum
+    if 0:
+        figure()
+        for i in xrange(10):
+            plot(t,traces[i,0,0,:])
+            xlabel('Time [s]')
+            title('Figure E')
+
+    
+    return 1
 
 def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_int=(0.1,0.4)):
     if new:
@@ -159,6 +225,7 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_i
             pbar = pg.ProgressBar(widgets=widgets, maxval=theta.size).start()
         _p = 6.
         _f = 1./_p
+        periods = arange(4.,11.)
         nstat, ntimes, nsub, nfft = seisn.shape
         nsources = theta.size
         freq = fftfreq(nfft,dt)
@@ -166,9 +233,8 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_i
         beamr = zeros((nsources,slowness.size,ntimes,nfft))
         beamt = zeros((nsources,slowness.size,ntimes,nfft))
         df = dt/nfft
+        idx = [int(1./(p*df)) for p in periods]
         ind = int(_f/df)
-        if DEBUG:
-            print ind, freq[ind]
         N = fft(seisn,n=nfft,axis=3)
         E = fft(seise,n=nfft,axis=3)
         for i,az in enumerate(theta):
@@ -179,27 +245,24 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_i
             T = -sin(daz)*N + cos(daz)*E
             dist = zetax[i,:]
             #for ww in [ind]:
-            for ww in I[0]:
+            for ww in idx:
                 FF = freq[ww]
                 omega = 2*pi*FF
-                for cc in xrange(slowness.shape[1]):
-                    velocity = 1./slowness[0][cc]*1000
-                    e = exp(-1j*dist*omega/velocity)
-                    eT = e.T.copy()
-                    for tt in xrange(ntimes):
-                    #for tt in [0]:
-                        for TT in xrange(nsub):
-                        #for TT in [0]:
-                            Yt = asmatrix(squeeze(T[:,tt,TT,ww]))
-                            Yr = asmatrix(squeeze(R[:,tt,TT,ww]))
-                            #Y = squeeze(R[:,tt,TT,ww])
-                            YtT = Yt.T.copy()
-                            YrT = Yr.T.copy()
-                            covr = dot(YrT,conjugate(Yr))
-                            covt = dot(YtT,conjugate(Yt))
-                            #import ipdb
-                            #ipdb.set_trace()
-                            #r,t = rotate_fft(seisn,seise,az)
+                for tt in xrange(ntimes):
+                #for tt in [0]:
+                    for TT in xrange(nsub):
+                    #for TT in [0]:
+                        Yt = asmatrix(squeeze(T[:,tt,TT,ww]))
+                        Yr = asmatrix(squeeze(R[:,tt,TT,ww]))
+                        #Y = squeeze(R[:,tt,TT,ww])
+                        YtT = Yt.T.copy()
+                        YrT = Yr.T.copy()
+                        covr = dot(YrT,conjugate(Yr))
+                        covt = dot(YtT,conjugate(Yt))
+                        for cc in xrange(slowness.shape[1]):
+                            velocity = 1./slowness[0][cc]*1000
+                            e = exp(-1j*dist*omega/velocity)
+                            eT = e.T.copy()
                             beamr[i,cc,tt,ww] += (abs(asarray(dot(conjugate(eT),dot(covr,e).T)))**2)/nsub
                             beamt[i,cc,tt,ww] += (abs(asarray(dot(conjugate(eT),dot(covt,e).T)))**2)/nsub
                             #beam[i,cc,tt] = abs(dot(Y,conjugate(e)))**2
@@ -222,10 +285,10 @@ def polar_plot(beam,theta,slowness):
     fig = figure(figsize=(6,6))
     ax = fig.add_subplot(1,1,1,projection='polar')
     cmap = cm.get_cmap('jet')
-    ax.contourf((theta[::-1]+90.)*pi/180.,slowness[14:],tre[:,14:].T,
+    ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
                 100,cmap=cmap,antialiased=True,
                 linewidths=0.1,linstyles='dotted')
-    ax.contour((theta[::-1]+90.)*pi/180.,slowness[14:],tre[:,14:].T,
+    ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
                 100,cmap=cmap)
     ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
                       labels=['90','45','0','315','270','225','180','135'])
@@ -236,20 +299,39 @@ def polar_plot(beam,theta,slowness):
 
 
 if __name__ == '__main__':
-    datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
-    filesN = glob.glob(os.path.join(datdir,'ft_grid*.HHN.SAC'))
-    filesE = glob.glob(os.path.join(datdir,'ft_grid*.HHE.SAC'))
-    matfile = 'prep_beam_h_2001_2_22.mat'
-    nlist = mkfilelist(filesN, filesE)
-    seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,
-                                                                   nhours=1,fmax=10.,fact=10,new=True)
-    zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
-    matfile = 'beam_h_2001_2_22.mat'
-    beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,
-                              new=True,freq_int=(0.1,0.4),matfile=matfile)
-    if 10:
-        polar_plot(beamr,theta,slowness)
-        polar_plot(beamt,theta,slowness)
-        show()
-    
+    if 0:
+        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
+        #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+        filesN = glob.glob(os.path.join(datdir,'ft_grid*.HHN.SAC'))
+        filesE = glob.glob(os.path.join(datdir,'ft_grid*.HHE.SAC'))
+        matfile = 'prep_beam_h_2001_2_22.mat'
+        nlist = mkfilelist(filesN, filesE)
+        if DEBUG:
+            print "preparing data"
+        seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,
+                                                                       nhours=1,fmax=10.,
+                                                                       fact=10,new=False)
+        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+        matfile = 'beam_h_2001_2_22.mat'
+        if DEBUG:
+            print "beamforming"
+        beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,
+                                  new=True,freq_int=(0.1,0.4),matfile=matfile)
+        if 1:
+            if DEBUG:
+                print "plotting"
+            polar_plot(beamr,theta,slowness)
+            polar_plot(beamt,theta,slowness)
+            show()
+    if 1:
+        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
+        #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+        filesN = glob.glob(os.path.join(datdir,'ft_grid*.HHN.SAC'))
+        filesE = glob.glob(os.path.join(datdir,'ft_grid*.HHE.SAC'))
+        matfile = 'prep_beam_h_2001_2_22.mat'
+        nlist = mkfilelist(filesN, filesE)
+        seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,
+                                                                       nhours=1,fmax=10.,
+                                                                       fact=10,new=False)
+        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+        syntest(theta,zetax)
