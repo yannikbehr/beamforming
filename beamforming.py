@@ -16,7 +16,10 @@ import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
 import pickle
+import scipy.interpolate as scint
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'misc'))
+sys.path.append(os.path.join(os.environ['PROC_SRC'],'NA'))
+from dinver_run import get_disp
 import progressbar as pg
 rcParams = {'backend':'Agg'}
 
@@ -146,22 +149,18 @@ def calc_steer(slats,slons):
 
 
 
-def beamforming(seis,slowness,zetax,nsources,dt,new=True,matfile=None,freq_int=(0.02,0.4)):
+def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,freq_int=(0.02,0.4)):
     if new:
-        periods = arange(4.,11.)
-        #periods = array([6.])
         #nfft,ntimes,nsub,nstat = seis.shape
         nstat,ntimes,nsub,nfft = seis.shape
         freq = fftfreq(nfft,dt)
         beam = zeros((nsources,slowness.size,ntimes,nfft))
-        df = dt/nfft
-        idx = [int(1./(p*df)) for p in periods]
         if not DEBUG:
             widgets = ['vertical beamforming: ', pg.Percentage(), ' ', pg.Bar('#'),
                        ' ', pg.ETA()]
-            pbar = pg.ProgressBar(widgets=widgets, maxval=len(idx)*ntimes).start()
+            pbar = pg.ProgressBar(widgets=widgets, maxval=len(indices)*ntimes).start()
             count = 0
-        for ww in idx:
+        for ww in indices:
             FF = freq[ww]
             for tt in xrange(ntimes):
                 if not DEBUG:
@@ -380,61 +379,65 @@ def polar_plot(beam,theta,slowness,resp=False):
     ax.set_rmax(0.5)
     show()
 
-def polar_plot_test(beam,theta,slowness,resp=False):
-    periods = arange(4.,11.)
+def polar_plot_test(beam,theta,slowness,indices,resp=False): 
     nfft = 128
     dt = 1.0
     df = dt/nfft
-    idx = [int(1./(p*df)) for p in periods]
     theta = theta[:,0]
     slowness = slowness[0,:]
     p = []
-    c = []
-    cmax = []
-    cerr = []
-    for ind in idx:
-        if 0:
-            tre = squeeze(beam[:,:,:,ind])
-            tre = tre-tre.max()
-            fig = figure(figsize=(6,6))
-            ax = fig.add_subplot(1,1,1,projection='polar')
-            cmap = cm.get_cmap('jet')
-            ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                        100,cmap=cmap,antialiased=True,
-                        linewidths=0.1,linstyles='dotted')
-            ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                       100,cmap=cmap)
-            ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
-                              labels=['90','45','0','315','270','225','180','135'])
-            ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
-            ax.set_title(str(1./(ind*df)))
-            ax.grid(True)
-            ax.set_rmax(0.5)
+    cmat = zeros((nfft,slowness.size))
+    for ind in indices:
+        tre = squeeze(beam[:,:,:,ind])
+        tre = tre/tre.max()
         p.append(1./(ind*df))
-        c.append(mean(1./slowness[beam[:,:,0,ind].argmax(axis=1)]))
-        cmax.append(mean(1./slowness[beam[45,:,0,ind].argmax()]))
-        cerr.append(std(1./slowness[beam[:,:,0,ind].argmax(axis=1)]))
-
+        cmat[ind,:] = tre[45,:]
+                                
     figure()
-    errorbar(p,c,yerr=cerr)
-    plot(p,cmax,'k--')
-    xmin, xmax = xlim()
-    model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
-             '2.  3.4 2.0 2.3 100. 200.\n',
-             '5.  6.5 3.8 2.5 100. 200.\n',
-             '0.  8.0 4.7 3.3 500. 900.\n']
-    rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
-    rayu,lovu = get_disp(model,0.02,1.0,gv=True)
-    indlc = where(lovc[:,0] > 0.)
-    indrc = where(rayc[:,0] > 0.)
-    indlu = where(lovu[:,0] > 0.)
-    indru = where(rayu[:,0] > 0.)
+    contourf(p,1./slowness,cmat[1::].T,100)
+
     if 1:
-        plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
+        xmin, xmax = xlim()
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  3.4 2.0 2.3 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
+        rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
+        rayu,lovu = get_disp(model,0.02,1.0,gv=True)
+        indlc = where(lovc[:,0] > 0.)
+        indrc = where(rayc[:,0] > 0.)
+        indlu = where(lovu[:,0] > 0.)
+        indru = where(rayu[:,0] > 0.)
+        plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Theoretical Rayleigh phase',color='black')
         xlabel('Period [s]')
         ylabel('Velocity [km/s]')
-        legend(loc='lower right')
+        legend(loc='upper right')
         xlim(xmin,xmax)
+    colorbar()
+    ax = gca()
+    ax.autoscale_view(tight=True)
+    xlim(1,20)
+
+    for ind in [6,32]:
+        tre = squeeze(beam[:,:,:,ind])
+        tre = tre/tre.max()
+        fig = figure(figsize=(6,6))
+        ax = fig.add_subplot(1,1,1,projection='polar')
+        cmap = cm.get_cmap('jet')
+        ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                    100,cmap=cmap,antialiased=True,
+                    linewidths=0.1,linstyles='dotted')
+        ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                   100,cmap=cmap)
+        ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                          labels=['90','45','0','315','270','225','180','135'])
+        ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+        ax.set_title(str(1./(ind*df)))
+        ax.grid(True)
+        ax.set_rmax(0.5)
+
+
+
     show()
 
 
@@ -500,12 +503,11 @@ def syntest(theta,zetax):
     for i,ddiff in enumerate(zetax[ind,:]/1000.):
         t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
         traces[i,0,0,:] = fsum
-    if 0:
+    if 1:
         figure()
-        for i in xrange(10):
+        for i in [0]:
             plot(t,traces[i,0,0,:])
             xlabel('Time [s]')
-            title('Figure E')
     fseis = fft(traces,n=128,axis=3)
     if np.isnan(fseis).any():
         print "NaN found"
@@ -523,14 +525,18 @@ if __name__ == '__main__':
         #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
         files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
         matfile = 'prep_beam_2001_2_22.mat'
-        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=False)
+        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=True)
         if DEBUG:
             print 'calculating steering vector'
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
         if DEBUG:
             print 'beamforming'
         #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
-        beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=False,matfile='6s_average_beam.mat')
+        nsources,ntimes,nsub,nfft = fseis.shape
+        df = dt/nfft
+        periods = [6.]
+        indices = [int(1./(p*df)) for p in periods]
+        beam = beamforming(fseis,slowness,zetax,theta.size,dt,indices,new=True,matfile='6s_average_beam.mat')
         polar_plot(beam,theta,slowness,resp=False)
     if 0:
         Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
@@ -553,5 +559,9 @@ if __name__ == '__main__':
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
         fseis = syntest(theta,zetax)
         dt = 1.0
-        beam = beamforming(fseis,slowness,zetax,theta.size,dt,new=True,matfile='test_beam.mat')
-        polar_plot_test(beam,theta,slowness,resp=False)
+        nsources,ntimes,nsub,nfft = fseis.shape
+        df = dt/nfft
+        indices = arange(nfft)
+        beam = beamforming(fseis,slowness,zetax,theta.size,dt,
+                           indices,new=True,matfile='test_beam.mat')
+        polar_plot_test(beam,theta,slowness,indices[1::],resp=False)
