@@ -203,19 +203,26 @@ def syntest(theta,zetax):
     dtheta = int(unique(diff(theta[:,0])))
     ind = int(round(225/dtheta))
     nsources, nstations = zetax.shape
-    traces = zeros((nstations,1,1,128))
+    rtraces = zeros((nstations,1,1,128))
+    ltraces = zeros((nstations,1,1,128))
     for i,ddiff in enumerate(zetax[ind,:]/1000.):
         t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
-        traces[i,0,0,:] = fsum
-    if 0:
+        rtraces[i,0,0,:] = fsum
+        t,fsum = syntrace(500.+ddiff,wtype='love')
+        ltraces[i,0,0,:] = fsum
+    if 1:
         figure()
-        for i in xrange(10):
-            plot(t,traces[i,0,0,:])
-            xlabel('Time [s]')
-            title('Figure E')
-
-    
-    return 1
+        subplot(2,1,1)
+        plot(t,rtraces[0,0,0,:],label='Rayleigh')
+        legend(loc='upper left')
+        subplot(2,1,2)
+        plot(t,ltraces[0,0,0,:],label='Love')
+        legend(loc='upper left')
+        xlabel('Time [s]')
+    phi = theta[ind]*pi/180.-pi
+    n = rtraces*sin(phi) + ltraces*cos(phi)
+    e = rtraces*cos(phi) - ltraces*sin(phi)
+    return n,e
 
 def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_int=(0.1,0.4)):
     if new:
@@ -240,7 +247,7 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_i
         for i,az in enumerate(theta):
             if not DEBUG:
                 pbar.update(i)
-            daz = az*pi/180.
+            daz = az*pi/180.-pi
             R = cos(daz)*N + sin(daz)*E
             T = -sin(daz)*N + cos(daz)*E
             dist = zetax[i,:]
@@ -297,6 +304,27 @@ def polar_plot(beam,theta,slowness):
     #ax.set_title(os.path.basename(_d))
     ax.set_rmax(0.5)
 
+def polar_plot_test(beam,theta,slowness):
+    theta = theta[:,0]
+    slowness = slowness[0,:]
+    tre = squeeze(beam[:,:,:,21])
+    #tre = tre.mean(axis=2)
+    tre = tre-tre.max()
+    fig = figure(figsize=(6,6))
+    ax = fig.add_subplot(1,1,1,projection='polar')
+    cmap = cm.get_cmap('jet')
+    ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                100,cmap=cmap,antialiased=True,
+                linewidths=0.1,linstyles='dotted')
+    ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                100,cmap=cmap)
+    ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                      labels=['90','45','0','315','270','225','180','135'])
+    ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+    ax.grid(True)
+    #ax.set_title(os.path.basename(_d))
+    ax.set_rmax(0.5)
+
 
 if __name__ == '__main__':
     if 0:
@@ -332,6 +360,11 @@ if __name__ == '__main__':
         nlist = mkfilelist(filesN, filesE)
         seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,
                                                                        nhours=1,fmax=10.,
-                                                                       fact=10,new=False)
+                                                                       fact=10,new=True)
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
-        syntest(theta,zetax)
+        seisn, seise = syntest(theta,zetax)
+        beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,
+                                  new=True,freq_int=(0.1,0.4),matfile=matfile)
+        polar_plot_test(beamr,theta,slowness)
+        polar_plot_test(beamt,theta,slowness)
+        show()
