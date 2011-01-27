@@ -12,6 +12,7 @@ from obspy.sac import *
 from obspy.core import read
 from pylab import *
 import obspy.signal
+from obspy.signal.invsim import cosTaper
 import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
@@ -77,6 +78,7 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
             fftpower = 7
             ismall = 2**fftpower
             ipick = arange(ismall)
+            taper = cosTaper(len(ipick))
             n=nhours*3600*df
             nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
             #seissmall = zeros((len(ipick),ntimes,nsub,nfiles))
@@ -85,7 +87,7 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
                 for jj in xrange(ntimes):
                     for kk in xrange(nsub):
                         #seissmall[:,jj,kk,ii] = seisband[kk*ismall+ipick,jj,ii]
-                        seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]
+                        seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]*taper
             
         #temp = fft(seissmall,n=2**fftpower,axis=0)
         #fseis = temp.copy()
@@ -435,9 +437,6 @@ def polar_plot_test(beam,theta,slowness,indices,resp=False):
         ax.set_title(str(1./(ind*df)))
         ax.grid(True)
         ax.set_rmax(0.5)
-
-
-
     show()
 
 
@@ -500,9 +499,10 @@ def syntest(theta,zetax):
     ind = int(round(225/dtheta))
     nsources, nstations = zetax.shape
     traces = zeros((nstations,1,1,128))
+    taper = cosTaper(128)
     for i,ddiff in enumerate(zetax[ind,:]/1000.):
         t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
-        traces[i,0,0,:] = fsum
+        traces[i,0,0,:] = fsum*taper
     if 1:
         figure()
         for i in [0]:
