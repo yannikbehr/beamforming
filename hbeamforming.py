@@ -11,6 +11,7 @@ from obspy.sac import *
 from obspy.core import read
 from pylab import *
 import obspy.signal
+from obspy.signal.invsim import cosTaper
 import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
@@ -64,6 +65,7 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True):
             ismall = 2**fftpower
             ipick = arange(ismall)
             n=nhours*3600*df
+            taper = cosTaper(len(ipick))
             nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
             #seissmall = zeros((len(ipick),ntimes,nsub,nfiles))
             seissmalln = zeros((nfiles,ntimes,nsub,len(ipick)))
@@ -72,8 +74,8 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True):
                 for jj in xrange(ntimes):
                     for kk in xrange(nsub):
                         #seissmall[:,jj,kk,ii] = seisband[kk*ismall+ipick,jj,ii]
-                        seissmalln[ii,jj,kk,:] = seisbandn[ii,jj,kk*ismall+ipick]
-                        seissmalle[ii,jj,kk,:] = seisbande[ii,jj,kk*ismall+ipick]
+                        seissmalln[ii,jj,kk,:] = seisbandn[ii,jj,kk*ismall+ipick]*taper
+                        seissmalle[ii,jj,kk,:] = seisbande[ii,jj,kk*ismall+ipick]*taper
 
         LonLref= 165
         LonUref= 179.9
@@ -205,18 +207,25 @@ def syntest(theta,zetax):
     nsources, nstations = zetax.shape
     rtraces = zeros((nstations,1,1,128))
     ltraces = zeros((nstations,1,1,128))
+    taper = cosTaper(128)
     for i,ddiff in enumerate(zetax[ind,:]/1000.):
         t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
-        rtraces[i,0,0,:] = fsum
+        rtraces[i,0,0,:] = fsum*taper
         t,fsum = syntrace(500.+ddiff,wtype='love')
-        ltraces[i,0,0,:] = fsum
+        ltraces[i,0,0,:] = fsum*taper
     if 1:
         figure()
         subplot(2,1,1)
         plot(t,rtraces[0,0,0,:],label='Rayleigh')
+        rtr = SacIO()
+        rtr.fromarray(rtraces[0,0,0,:],distkm=500.+zetax[ind,0]/1000.)
+        rtr.WriteSacBinary('rayleigh_synthetic.sac')
         legend(loc='upper left')
         subplot(2,1,2)
         plot(t,ltraces[0,0,0,:],label='Love')
+        ltr = SacIO()
+        ltr.fromarray(ltraces[0,0,0,:],distkm=500.+zetax[ind,0]/1000.)
+        ltr.WriteSacBinary('love_synthetic.sac')
         legend(loc='upper left')
         xlabel('Time [s]')
     phi = theta[ind]*pi/180.-pi
@@ -224,24 +233,18 @@ def syntest(theta,zetax):
     e = rtraces*cos(phi) - ltraces*sin(phi)
     return n,e
 
-def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_int=(0.1,0.4)):
+def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=None,freq_int=(0.1,0.4)):
     if new:
         if not DEBUG:
             widgets = ['horizontal beamforming: ', pg.Percentage(), ' ', pg.Bar('#'),
                        ' ', pg.ETA()]
             pbar = pg.ProgressBar(widgets=widgets, maxval=theta.size).start()
-        _p = 6.
-        _f = 1./_p
-        periods = arange(4.,11.)
         nstat, ntimes, nsub, nfft = seisn.shape
         nsources = theta.size
         freq = fftfreq(nfft,dt)
         I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
         beamr = zeros((nsources,slowness.size,ntimes,nfft))
         beamt = zeros((nsources,slowness.size,ntimes,nfft))
-        df = dt/nfft
-        idx = [int(1./(p*df)) for p in periods]
-        ind = int(_f/df)
         N = fft(seisn,n=nfft,axis=3)
         E = fft(seise,n=nfft,axis=3)
         for i,az in enumerate(theta):
@@ -252,7 +255,7 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,new=True,matfile=None,freq_i
             T = -sin(daz)*N + cos(daz)*E
             dist = zetax[i,:]
             #for ww in [ind]:
-            for ww in idx:
+            for ww in indices:
                 FF = freq[ww]
                 omega = 2*pi*FF
                 for tt in xrange(ntimes):
@@ -304,27 +307,68 @@ def polar_plot(beam,theta,slowness):
     #ax.set_title(os.path.basename(_d))
     ax.set_rmax(0.5)
 
-def polar_plot_test(beam,theta,slowness):
+def polar_plot_test(beam,theta,slowness,indices,wtype,resp=False): 
+    nfft = 128
+    dt = 1.0
+    df = dt/nfft
     theta = theta[:,0]
     slowness = slowness[0,:]
-    tre = squeeze(beam[:,:,:,21])
-    #tre = tre.mean(axis=2)
-    tre = tre-tre.max()
-    fig = figure(figsize=(6,6))
-    ax = fig.add_subplot(1,1,1,projection='polar')
-    cmap = cm.get_cmap('jet')
-    ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                100,cmap=cmap,antialiased=True,
-                linewidths=0.1,linstyles='dotted')
-    ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                100,cmap=cmap)
-    ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
-                      labels=['90','45','0','315','270','225','180','135'])
-    ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
-    ax.grid(True)
-    #ax.set_title(os.path.basename(_d))
-    ax.set_rmax(0.5)
+    p = []
+    cmat = zeros((nfft,slowness.size))
+    for ind in indices:
+        tre = squeeze(beam[:,:,:,ind])
+        tre = tre/tre.max()
+        p.append(1./(ind*df))
+        cmat[ind,:] = tre[45,:]
+                                
+    figure()
+    contourf(p,1./slowness,cmat[1::].T,100)
 
+    if 1:
+        xmin, xmax = xlim()
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  3.4 2.0 2.3 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
+        rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
+        rayu,lovu = get_disp(model,0.02,1.0,gv=True)
+        indlc = where(lovc[:,0] > 0.)
+        indrc = where(rayc[:,0] > 0.)
+        indlu = where(lovu[:,0] > 0.)
+        indru = where(rayu[:,0] > 0.)
+        if wtype == 'rayleigh':
+            plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Theoretical Rayleigh phase',color='black')
+        elif wtype == 'love':
+            plot(1./lovc[indlc,0][0],1./lovc[indlc,1][0],label='Theoretical Love phase',color='black')
+        else:
+            print 'wtype either has to be rayleigh or love'
+        xlabel('Period [s]')
+        ylabel('Velocity [km/s]')
+        legend(loc='upper right')
+        xlim(xmin,xmax)
+    colorbar()
+    ax = gca()
+    ax.autoscale_view(tight=True)
+    xlim(1,20)
+
+    for ind in [6,32]:
+        tre = squeeze(beam[:,:,:,ind])
+        tre = tre/tre.max()
+        fig = figure(figsize=(6,6))
+        ax = fig.add_subplot(1,1,1,projection='polar')
+        cmap = cm.get_cmap('jet')
+        ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                    100,cmap=cmap,antialiased=True,
+                    linewidths=0.1,linstyles='dotted')
+        ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                   100,cmap=cmap)
+        ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                          labels=['90','45','0','315','270','225','180','135'])
+        ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+        ax.set_title("%s %ds period"%(wtype,1./(ind*df)))
+        ax.grid(True)
+        ax.set_rmax(0.5)
+    show()
 
 if __name__ == '__main__':
     if 0:
@@ -360,11 +404,17 @@ if __name__ == '__main__':
         nlist = mkfilelist(filesN, filesE)
         seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile,
                                                                        nhours=1,fmax=10.,
-                                                                       fact=10,new=True)
+                                                                       fact=10,new=False)
         zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
         seisn, seise = syntest(theta,zetax)
-        beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,
+        matfile = 'beam_h_2001_2_22.mat'
+        nstat, ntimes, nsub, nfft = seisn.shape
+        df = dt/nfft
+        periods = arange(4.,11.)
+        indices = [int(1./(p*df)) for p in periods]
+        indices = arange(nfft)
+        beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,indices,
                                   new=True,freq_int=(0.1,0.4),matfile=matfile)
-        polar_plot_test(beamr,theta,slowness)
-        polar_plot_test(beamt,theta,slowness)
+        polar_plot_test(beamr,theta,slowness,indices[1::],'rayleigh')
+        polar_plot_test(beamt,theta,slowness,indices[1::],'love')
         show()
