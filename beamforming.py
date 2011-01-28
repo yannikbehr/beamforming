@@ -20,6 +20,7 @@ import pickle
 import scipy.interpolate as scint
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'misc'))
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'NA'))
+from herman_surface_wave import herman_syn
 from dinver_run import get_disp
 import progressbar as pg
 rcParams = {'backend':'Agg'}
@@ -382,7 +383,7 @@ def polar_plot(beam,theta,slowness,resp=False):
     show()
 
 def polar_plot_test(beam,theta,slowness,indices,resp=False): 
-    nfft = 128
+    nfft = 256
     dt = 1.0
     df = dt/nfft
     theta = theta[:,0]
@@ -404,6 +405,10 @@ def polar_plot_test(beam,theta,slowness,indices,resp=False):
                  '2.  3.4 2.0 2.3 100. 200.\n',
                  '5.  6.5 3.8 2.5 100. 200.\n',
                  '0.  8.0 4.7 3.3 500. 900.\n']
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  6.2 3.6 2.5 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
         rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
         rayu,lovu = get_disp(model,0.02,1.0,gv=True)
         indlc = where(lovc[:,0] > 0.)
@@ -419,8 +424,9 @@ def polar_plot_test(beam,theta,slowness,indices,resp=False):
     ax = gca()
     ax.autoscale_view(tight=True)
     xlim(1,20)
-
-    for ind in [6,32]:
+    periods = [4.,20.]
+    idx = [int(1./(p*df)) for p in periods]
+    for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre/tre.max()
         fig = figure(figsize=(6,6))
@@ -440,75 +446,96 @@ def polar_plot_test(beam,theta,slowness,indices,resp=False):
     show()
 
 
-def syntrace(dist,wtype='rayleigh'):
-    model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
-             '2.  3.4 2.0 2.3 100. 200.\n',
-             '5.  6.5 3.8 2.5 100. 200.\n',
-             '0.  8.0 4.7 3.3 500. 900.\n']
-    rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
-    rayu,lovu = get_disp(model,0.02,1.0,gv=True)
-    indlc = where(lovc[:,0] > 0.)
-    indrc = where(rayc[:,0] > 0.)
-    indlu = where(lovu[:,0] > 0.)
-    indru = where(rayu[:,0] > 0.)
-    if 0:
-        plot(1./lovc[indlc,0][0],1./lovc[indlc,1][0],label='Love phase')
-        plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
-        plot(1./lovu[indlu,0][0],1./lovu[indlu,1][0],label='Love group')
-        plot(1./rayu[indru,0][0],1./rayu[indru,1][0],label='Rayleigh group')
-        xlabel('Period [s]')
-        ylabel('Velocity [km/s]')
-        legend(loc='lower right')
+def syntrace(dist,wtype='rayleigh',wmodel='Herrmann'):
+    if wmodel == 'Aki':
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  3.4 2.0 2.3 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  6.2 3.6 2.5 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
+        rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
+        rayu,lovu = get_disp(model,0.02,1.0,gv=True)
+        indlc = where(lovc[:,0] > 0.)
+        indrc = where(rayc[:,0] > 0.)
+        indlu = where(lovu[:,0] > 0.)
+        indru = where(rayu[:,0] > 0.)
+        if 0:
+            plot(1./lovc[indlc,0][0],1./lovc[indlc,1][0],label='Love phase')
+            plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
+            plot(1./lovu[indlu,0][0],1./lovu[indlu,1][0],label='Love group')
+            plot(1./rayu[indru,0][0],1./rayu[indru,1][0],label='Rayleigh group')
+            xlabel('Period [s]')
+            ylabel('Velocity [km/s]')
+            legend(loc='lower right')
 
 
-    ################# calculate a synthetic seismogram by summing the
-    ################# contributions of wavepackages centered around
-    ################# frequency intervals of 0.01 Hz from 0 to 1 Hz
-    df = 0.01
-    fint = arange(0.02,1.01,0.01)
-    if wtype == 'rayleigh':
-        frc = rayc[indrc,0][0]
-        fru = rayu[indru,0][0]
-        c = 1./rayc[indrc,1][0]
-        u = 1./rayu[indru,1][0]
-    elif wtype == 'love':
-        frc = lovc[indlc,0][0]
-        fru = lovu[indlu,0][0]
-        c = 1./lovc[indlc,1][0]
-        u = 1./lovu[indlu,1][0]
+        ################# calculate a synthetic seismogram by summing the
+        ################# contributions of wavepackages centered around
+        ################# frequency intervals of 0.01 Hz from 0 to 1 Hz
+        df = 0.01
+        fint = arange(0.02,1.01,0.01)
+        if wtype == 'rayleigh':
+            frc = rayc[indrc,0][0]
+            fru = rayu[indru,0][0]
+            c = 1./rayc[indrc,1][0]
+            u = 1./rayu[indru,1][0]
+        elif wtype == 'love':
+            frc = lovc[indlc,0][0]
+            fru = lovu[indlu,0][0]
+            c = 1./lovc[indlc,1][0]
+            u = 1./lovu[indlu,1][0]
+        else:
+            print "incorrect wave type [rayleigh or love]"
+        dom = 2*pi*df
+        om0 = 0.005+fint[:-1]*2*pi
+        om0 = fint*2*pi
+        x = dist
+        t = linspace(0,256,256)
+        repc = scint.splrep(2*pi*frc,c)
+        repu = scint.splrep(2*pi*fru,u)
+        fsum = 0
+
+        for _w in om0:
+            y = dom/2.*(t-(x/scint.splev(_w,repu)))
+            f0 = dom/pi*sin(y)/y*cos(_w*t-_w*x/scint.splev(_w,repc))
+            fsum += f0
+        return t,fsum
+
+    elif wmodel == 'Herrmann':
+        model = ['3. 6.0 3.5 2.5 100.0 200.0 0.0 0.0 1.0 1.0\n',
+                 '2. 3.4 2.0 2.3 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '5. 6.5 3.8 2.5 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '0. 8.0 4.7 3.3 500.0 900.0 0.0 0.0 1.0 1.0\n']
+        model = ['3. 6.0 3.5 2.5 100.0 200.0 0.0 0.0 1.0 1.0\n',
+                 '2. 6.2 3.6 2.5 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '5. 6.5 3.8 2.5 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '0. 8.0 4.7 3.3 500.0 900.0 0.0 0.0 1.0 1.0\n']
+        time = linspace(0,256,256)
+        z,r,t = herman_syn(model,dist,npts=256)
+        return time,z
     else:
-        print "incorrect wave type [rayleigh or love]"
-    dom = 2*pi*df
-    om0 = 0.005+fint[:-1]*2*pi
-    om0 = fint*2*pi
-    x = dist
-    t = linspace(80,208,128)
-    repc = scint.splrep(2*pi*frc,c)
-    repu = scint.splrep(2*pi*fru,u)
-    fsum = 0
+        print "wmodel has to be either Herrmann or Aki"
 
-    for _w in om0:
-        y = dom/2.*(t-(x/scint.splev(_w,repu)))
-        f0 = dom/pi*sin(y)/y*cos(_w*t-_w*x/scint.splev(_w,repc))
-        fsum += f0
-
-    return t,fsum
 
 def syntest(theta,zetax):
     dtheta = int(unique(diff(theta[:,0])))
     ind = int(round(225/dtheta))
     nsources, nstations = zetax.shape
-    traces = zeros((nstations,1,1,128))
-    taper = cosTaper(128)
+    npts = 256
+    traces = zeros((nstations,1,1,npts))
+    taper = cosTaper(npts)
     for i,ddiff in enumerate(zetax[ind,:]/1000.):
-        t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
-        traces[i,0,0,:] = fsum*taper
+        t,z = syntrace(500.+ddiff,wtype='rayleigh')
+        traces[i,0,0,:] = z*taper
     if 1:
         figure()
         for i in [0]:
             plot(t,traces[i,0,0,:])
             xlabel('Time [s]')
-    fseis = fft(traces,n=128,axis=3)
+    fseis = fft(traces,n=npts,axis=3)
     if np.isnan(fseis).any():
         print "NaN found"
         return

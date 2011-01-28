@@ -19,6 +19,7 @@ import pickle
 import scipy.interpolate as scint
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'misc'))
 sys.path.append(os.path.join(os.environ['PROC_SRC'],'NA'))
+from herman_surface_wave import herman_syn
 from dinver_run import get_disp
 import progressbar as pg
 rcParams = {'backend':'Agg'}
@@ -147,71 +148,96 @@ def mkfilelist(filesN, filesE):
             
     return newlist
 
-def syntrace(dist,wtype='rayleigh'):
-    model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
-             '2.  3.4 2.0 2.3 100. 200.\n',
-             '5.  6.5 3.8 2.5 100. 200.\n',
-             '0.  8.0 4.7 3.3 500. 900.\n']
-    rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
-    rayu,lovu = get_disp(model,0.02,1.0,gv=True)
-    indlc = where(lovc[:,0] > 0.)
-    indrc = where(rayc[:,0] > 0.)
-    indlu = where(lovu[:,0] > 0.)
-    indru = where(rayu[:,0] > 0.)
-    if 0:
-        plot(1./lovc[indlc,0][0],1./lovc[indlc,1][0],label='Love phase')
-        plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
-        plot(1./lovu[indlu,0][0],1./lovu[indlu,1][0],label='Love group')
-        plot(1./rayu[indru,0][0],1./rayu[indru,1][0],label='Rayleigh group')
-        xlabel('Period [s]')
-        ylabel('Velocity [km/s]')
-        legend(loc='lower right')
+def syntrace(dist,wtype='rayleigh',wmodel='Herrmann'):
+    if wmodel == 'Aki':
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  3.4 2.0 2.3 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  6.2 3.6 2.5 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
+        rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
+        rayu,lovu = get_disp(model,0.02,1.0,gv=True)
+        indlc = where(lovc[:,0] > 0.)
+        indrc = where(rayc[:,0] > 0.)
+        indlu = where(lovu[:,0] > 0.)
+        indru = where(rayu[:,0] > 0.)
+        if 0:
+            plot(1./lovc[indlc,0][0],1./lovc[indlc,1][0],label='Love phase')
+            plot(1./rayc[indrc,0][0],1./rayc[indrc,1][0],label='Rayleigh phase')
+            plot(1./lovu[indlu,0][0],1./lovu[indlu,1][0],label='Love group')
+            plot(1./rayu[indru,0][0],1./rayu[indru,1][0],label='Rayleigh group')
+            xlabel('Period [s]')
+            ylabel('Velocity [km/s]')
+            legend(loc='lower right')
 
 
-    ################# calculate a synthetic seismogram by summing the
-    ################# contributions of wavepackages centered around
-    ################# frequency intervals of 0.01 Hz from 0 to 1 Hz
-    df = 0.01
-    fint = arange(0.02,1.01,0.01)
-    if wtype == 'rayleigh':
-        frc = rayc[indrc,0][0]
-        fru = rayu[indru,0][0]
-        c = 1./rayc[indrc,1][0]
-        u = 1./rayu[indru,1][0]
-    elif wtype == 'love':
-        frc = lovc[indlc,0][0]
-        fru = lovu[indlu,0][0]
-        c = 1./lovc[indlc,1][0]
-        u = 1./lovu[indlu,1][0]
+        ################# calculate a synthetic seismogram by summing the
+        ################# contributions of wavepackages centered around
+        ################# frequency intervals of 0.01 Hz from 0 to 1 Hz
+        df = 0.01
+        fint = arange(0.02,1.01,0.01)
+        if wtype == 'rayleigh':
+            frc = rayc[indrc,0][0]
+            fru = rayu[indru,0][0]
+            c = 1./rayc[indrc,1][0]
+            u = 1./rayu[indru,1][0]
+        elif wtype == 'love':
+            frc = lovc[indlc,0][0]
+            fru = lovu[indlu,0][0]
+            c = 1./lovc[indlc,1][0]
+            u = 1./lovu[indlu,1][0]
+        else:
+            print "incorrect wave type [rayleigh or love]"
+        dom = 2*pi*df
+        om0 = 0.005+fint[:-1]*2*pi
+        om0 = fint*2*pi
+        x = dist
+        t = linspace(0,256,256)
+        repc = scint.splrep(2*pi*frc,c)
+        repu = scint.splrep(2*pi*fru,u)
+        fsum = 0
+
+        for _w in om0:
+            y = dom/2.*(t-(x/scint.splev(_w,repu)))
+            f0 = dom/pi*sin(y)/y*cos(_w*t-_w*x/scint.splev(_w,repc))
+            fsum += f0
+        return t,fsum
+
+    elif wmodel == 'Herrmann':
+        model = ['3. 6.0 3.5 2.5 100.0 200.0 0.0 0.0 1.0 1.0\n',
+                 '2. 3.4 2.0 2.3 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '5. 6.5 3.8 2.5 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '0. 8.0 4.7 3.3 500.0 900.0 0.0 0.0 1.0 1.0\n']
+        model = ['3. 6.0 3.5 2.5 100.0 200.0 0.0 0.0 1.0 1.0\n',
+                 '2. 6.2 3.6 2.5 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '5. 6.5 3.8 2.5 100. 200. 0.0 0.0 1.0 1.0\n',
+                 '0. 8.0 4.7 3.3 500.0 900.0 0.0 0.0 1.0 1.0\n']
+        z,r,t = herman_syn(model,dist,npts=256)
+        time = linspace(0,256,256)
+        if wtype == 'rayleigh':
+            return time,z
+        if wtype == 'love':
+            return time,t
+        else:
+            print "incorrect wave type [rayleigh or love]"
     else:
-        print "incorrect wave type [rayleigh or love]"
-    dom = 2*pi*df
-    om0 = 0.005+fint[:-1]*2*pi
-    om0 = fint*2*pi
-    x = dist
-    t = linspace(80,208,128)
-    repc = scint.splrep(2*pi*frc,c)
-    repu = scint.splrep(2*pi*fru,u)
-    fsum = 0
-
-    for _w in om0:
-        y = dom/2.*(t-(x/scint.splev(_w,repu)))
-        f0 = dom/pi*sin(y)/y*cos(_w*t-_w*x/scint.splev(_w,repc))
-        fsum += f0
-
-    return t,fsum
+        print "wmodel has to be either Herrmann or Aki"
 
 def syntest(theta,zetax):
     dtheta = int(unique(diff(theta[:,0])))
     ind = int(round(225/dtheta))
     nsources, nstations = zetax.shape
-    rtraces = zeros((nstations,1,1,128))
-    ltraces = zeros((nstations,1,1,128))
-    taper = cosTaper(128)
+    npts = 256
+    rtraces = zeros((nstations,1,1,npts))
+    ltraces = zeros((nstations,1,1,npts))
+    taper = cosTaper(npts)
     for i,ddiff in enumerate(zetax[ind,:]/1000.):
-        t,fsum = syntrace(500.+ddiff,wtype='rayleigh')
+        t,fsum = syntrace(500.+ddiff,wtype='rayleigh',wmodel='Herrmann')
         rtraces[i,0,0,:] = fsum*taper
-        t,fsum = syntrace(500.+ddiff,wtype='love')
+        t,fsum = syntrace(500.+ddiff,wtype='love',wmodel='Herrmann')
         ltraces[i,0,0,:] = fsum*taper
     if 1:
         figure()
@@ -308,7 +334,7 @@ def polar_plot(beam,theta,slowness):
     ax.set_rmax(0.5)
 
 def polar_plot_test(beam,theta,slowness,indices,wtype,resp=False): 
-    nfft = 128
+    nfft = 256
     dt = 1.0
     df = dt/nfft
     theta = theta[:,0]
@@ -328,6 +354,10 @@ def polar_plot_test(beam,theta,slowness,indices,wtype,resp=False):
         xmin, xmax = xlim()
         model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
                  '2.  3.4 2.0 2.3 100. 200.\n',
+                 '5.  6.5 3.8 2.5 100. 200.\n',
+                 '0.  8.0 4.7 3.3 500. 900.\n']
+        model = ['4\n','3.  6.0 3.5 2.5 100. 200.\n',
+                 '2.  6.2 3.6 2.5 100. 200.\n',
                  '5.  6.5 3.8 2.5 100. 200.\n',
                  '0.  8.0 4.7 3.3 500. 900.\n']
         rayc,lovc = get_disp(model,0.02,1.0,nmode=1)
@@ -350,8 +380,9 @@ def polar_plot_test(beam,theta,slowness,indices,wtype,resp=False):
     ax = gca()
     ax.autoscale_view(tight=True)
     xlim(1,20)
-
-    for ind in [6,32]:
+    periods = [6.,20.]
+    idx = [int(1./(p*df)) for p in periods]
+    for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre/tre.max()
         fig = figure(figsize=(6,6))
@@ -368,7 +399,6 @@ def polar_plot_test(beam,theta,slowness,indices,wtype,resp=False):
         ax.set_title("%s %ds period"%(wtype,1./(ind*df)))
         ax.grid(True)
         ax.set_rmax(0.5)
-    show()
 
 if __name__ == '__main__':
     if 0:
@@ -415,6 +445,7 @@ if __name__ == '__main__':
         indices = arange(nfft)
         beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,indices,
                                   new=True,freq_int=(0.1,0.4),matfile=matfile)
-        polar_plot_test(beamr,theta,slowness,indices[1::],'rayleigh')
-        polar_plot_test(beamt,theta,slowness,indices[1::],'love')
-        show()
+        if 1:
+            polar_plot_test(beamr,theta,slowness,indices[1::],'rayleigh')
+            polar_plot_test(beamt,theta,slowness,indices[1::],'love')
+            show()
