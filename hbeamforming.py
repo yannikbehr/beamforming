@@ -8,6 +8,8 @@ import sys
 import glob
 from obspy.sac import *
 from obspy.core import read
+import matplotlib
+matplotlib.use('Agg')
 from pylab import *
 import obspy.signal
 from obspy.signal.invsim import cosTaper
@@ -321,7 +323,7 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=Non
     return beamr, beamt
 
 
-def polar_plot(beam,theta,slowness,dt,nfft,wtype):
+def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
     df = dt/nfft
     periods = [6.]
     idx = [int(1./(p*df)) for p in periods]
@@ -345,6 +347,8 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype):
         ax.grid(True)
         ax.set_title("%s %ds period"%(wtype,1./(ind*df)))
         ax.set_rmax(0.5)
+        if fout is not None:
+            savefig(fout)
 
 def polar_plot_resp(beam,theta,slowness,dt,nfft):
     df = dt/nfft
@@ -536,7 +540,7 @@ def test(datdir,nprep=False,nbeam=False,doplot=True):
         polar_plot_test(beamt,theta,slowness,indices[1::],'love',dt,nfft)
         show()
 
-def main(datdir,nprep=False,nbeam=False,doplot=True):
+def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
     filesN = glob.glob(os.path.join(datdir,'ft_*.*HN.SAC'))
     filesE = glob.glob(os.path.join(datdir,'ft_*.*HE.SAC'))
     if datdir.endswith('/'):
@@ -560,13 +564,20 @@ def main(datdir,nprep=False,nbeam=False,doplot=True):
     nsources,ntimes,nsub,nfft = seisn.shape
     df = dt/nfft
     periods = [6.]
+    periods = [4.,5.,6.,7.,8.,9.,10.]
     indices = [int(1./(p*df)) for p in periods]
     beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,indices,
                               new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
     if doplot:
-        polar_plot(beamr,theta,slowness,dt,nfft,'rayleigh')
-        polar_plot(beamt,theta,slowness,dt,nfft,'love')
-        show()
+        fout = None
+        if save:
+            fout = matfile2.replace('.mat','_radial.png')
+        polar_plot(beamr,theta,slowness,dt,nfft,'rayleigh',fout=fout)
+        if save:
+            fout = matfile2.replace('.mat','_transverse.png')
+        polar_plot(beamt,theta,slowness,dt,nfft,'love',fout=fout)
+        if not save:
+            show()
 
 if __name__ == '__main__':
     from optparse import OptionParser
@@ -582,11 +593,12 @@ if __name__ == '__main__':
     parser.add_option("-d","--data",dest="data",action="store_true",
                       help="Prepare data.",
                       default=False)
-
+    parser.add_option("-s","--save",dest="save",action="store_true",
+                      help="Save output to file.",
+                      default=False)
     parser.add_option("--noplot",dest="plot",action="store_false",
                       help="Don't plot anything.",
                       default=True)
-
     parser.add_option("--resp",dest="aresp",action="store_true",
                       help="Calculate array response.",
                       default=False)
@@ -600,4 +612,4 @@ if __name__ == '__main__':
         response(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
     else:
         datdir = args[0]
-        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
+        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,save=opts.save)

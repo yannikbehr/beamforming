@@ -1,5 +1,5 @@
 #!/usr/bin/env mypython
-####/usr/local/python2/bin/python
+
 """
 next try to rewrite laura's beamformer
 """
@@ -10,6 +10,8 @@ import glob
 import obspy.sac
 from obspy.sac import *
 from obspy.core import read
+import matplotlib
+matplotlib.use('Agg')
 from pylab import *
 import obspy.signal
 from obspy.signal.invsim import cosTaper
@@ -337,7 +339,7 @@ def arr_resp(nfft,dt,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
         return beam
         
 
-def polar_plot(beam,theta,slowness,dt,nfft,wtype):
+def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
     df = dt/nfft
     periods = [6.]
     idx = [int(1./(p*df)) for p in periods]
@@ -361,6 +363,8 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype):
         ax.grid(True)
         ax.set_title("%s %ds period"%(wtype,1./(ind*df)))
         ax.set_rmax(0.5)
+        if fout is not None:
+            savefig(fout)
 
 def polar_plot_resp(beam,theta,slowness,dt,nfft):
     df = dt/nfft
@@ -614,7 +618,7 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
     polar_plot_resp(beam,theta,slowness,dt,nfft)
     show()
 
-def main(datdir,nprep=False,nbeam=False,doplot=True):
+def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
     files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
     if len(files) < 2:
         print "not enough files in ",datdir
@@ -640,13 +644,18 @@ def main(datdir,nprep=False,nbeam=False,doplot=True):
     nsources,ntimes,nsub,nfft = fseis.shape
     df = dt/nfft
     periods = [6.]
+    periods = [4.,5.,6.,7.,8.,9.,10.]
     indices = [int(1./(p*df)) for p in periods]
     beam = beamforming(fseis,slowness,zetax,theta.size,dt,indices,
                               new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
 #        #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
     if doplot:
-        polar_plot(beam,theta,slowness,dt,nfft,'rayleigh')
-        show()
+        fout = None
+        if save:
+            fout = matfile2.replace('.mat','_vertical.png')
+        polar_plot(beam,theta,slowness,dt,nfft,'rayleigh',fout=fout)
+        if not save:
+            show()
 
 
 if __name__ == '__main__':
@@ -663,11 +672,12 @@ if __name__ == '__main__':
     parser.add_option("-d","--data",dest="data",action="store_true",
                       help="Prepare data.",
                       default=False)
-
+    parser.add_option("-s","--save",dest="save",action="store_true",
+                      help="Save output to file.",
+                      default=False)
     parser.add_option("--noplot",dest="plot",action="store_false",
                       help="Don't plot anything.",
                       default=True)
-
     parser.add_option("--resp",dest="aresp",action="store_true",
                       help="Calculate array response.",
                       default=False)
@@ -681,4 +691,4 @@ if __name__ == '__main__':
         response(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
     else:
         datdir = args[0]
-        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
+        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,save=opts.save)
