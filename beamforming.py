@@ -132,6 +132,8 @@ def calc_steer(slats,slons):
     theta = theta.reshape((theta.size,1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
+    meanlat = slats.mean()
+    meanlon = slons.mean()
     for lat,lon in zip(slats,slons):
         dist, az, baz = obspy.signal.rotate.gps2DistAzimuth(meanlat,meanlon,lat,lon)
         sta_origin_dist = append(sta_origin_dist,dist)
@@ -301,8 +303,8 @@ def beamforming_c(seis1,seissmall,slowness,zetax,nsources,dt,theta,new=True,
         beam = sio.loadmat(matfile)['beam']
     return beam
 
-def arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
-             new=True,matfile=None,src=False,fout=None,pplot=True):
+def arr_resp(nfft,dt,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
+             new=True,matfile=None,src=False):
     """
     calculate array response
     """
@@ -312,9 +314,10 @@ def arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
         zeta_y = -sin(theta1*pi/180.)
         zeta_src = zeta_x*sta_origin_x + zeta_y*sta_origin_y
         c1 = 3000
-        beam = zeros((zetax.shape[0],freqs.size,slowness.size))
-        for ww in xrange(freqs.shape[1]):
-            FF = freqs[0][ww]
+        freqs = fftfreq(nfft,dt)
+        beam = zeros((zetax.shape[0],slowness.size,nfft))
+        for ww in indices:
+            FF = freqs[ww]
             for cc in xrange(slowness.shape[1]):
                 omega = 2*pi*FF
                 velocity = 1./slowness[0][cc]*1000
@@ -326,65 +329,64 @@ def arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
                     R = dot(Y,conjugate(Y).T)
                 else:
                     R = ones((zetax.shape[1],zetax.shape[1]))
-                beam[:,ww,cc] = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+                beam[:,cc,ww] = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
         sio.savemat(matfile,{'beam':beam})
+        return beam
     else:
         beam = sio.loadmat(matfile)['beam']
-    theta = theta[:,0]
-    slowness = slowness[0,:]
-    fig = figure(figsize=(10,10))
-    ff = [5,7,10,18]
-    if pplot:
-        for _r in xrange(4):
-            tre = squeeze(beam[:,ff[_r],:])
-            tre = tre-tre.max()
-            ax = fig.add_subplot(2,2,_r+1,projection='polar')
-            cmap = cm.get_cmap('jet')
-            ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                        100,cmap=cmap,antialiased=True,
-                        linewidths=0.1,linstyles='dotted')
-            ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                       100,cmap=cmap)
-            #ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
-            #                  labels=['90','45','0','315','270','225','180','135'])
-            ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
-                              labels=[])
-            ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','s/km'],color='r')
-            ax.grid(True)
-            ax.set_title(os.path.basename("%.1f s"%(round(1./freqs[0][ff[_r]],1))))
-            ax.set_rmax(0.5)
-        savefig(fout)
-        show()
+        return beam
         
 
-def polar_plot(beam,theta,slowness,resp=False):
+def polar_plot(beam,theta,slowness,dt,nfft,wtype):
+    df = dt/nfft
+    periods = [6.]
+    idx = [int(1./(p*df)) for p in periods]
     theta = theta[:,0]
     slowness = slowness[0,:]
-    if resp:
-        tre = squeeze(beam[:,18,:])
-    else:
-        tre = squeeze(beam[:,:,:,21])
+    for ind in idx:
+        tre = squeeze(beam[:,:,:,ind])
         tre = tre.mean(axis=2)
-    tre = tre-tre.max()
-    fig = figure(figsize=(6,6))
-    ax = fig.add_subplot(1,1,1,projection='polar')
-    cmap = cm.get_cmap('jet')
-    ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                100,cmap=cmap,antialiased=True,
-                linewidths=0.1,linstyles='dotted')
-    ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                100,cmap=cmap)
-    ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
-                      labels=['90','45','0','315','270','225','180','135'])
-    ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
-    ax.grid(True)
-    #ax.set_title(os.path.basename(_d))
-    ax.set_rmax(0.5)
-    show()
+        tre = tre-tre.max()
+        fig = figure(figsize=(6,6))
+        ax = fig.add_subplot(1,1,1,projection='polar')
+        cmap = cm.get_cmap('jet')
+        ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                    100,cmap=cmap,antialiased=True,
+                    linstyles='dotted')
+        ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                   100,cmap=cmap)
+        ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                          labels=['90','45','0','315','270','225','180','135'])
+        ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+        ax.grid(True)
+        ax.set_title("%s %ds period"%(wtype,1./(ind*df)))
+        ax.set_rmax(0.5)
 
-def polar_plot_test(beam,theta,slowness,indices,resp=False): 
-    nfft = 256
-    dt = 1.0
+def polar_plot_resp(beam,theta,slowness,dt,nfft):
+    df = dt/nfft
+    periods = [6.]
+    idx = [int(1./(p*df)) for p in periods]
+    theta = theta[:,0]
+    slowness = slowness[0,:]
+    for ind in idx:
+        tre = squeeze(beam[:,:,ind])
+        tre = tre-tre.max()
+        fig = figure(figsize=(6,6))
+        ax = fig.add_subplot(1,1,1,projection='polar')
+        cmap = cm.get_cmap('jet')
+        ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                    100,cmap=cmap,antialiased=True,
+                    linstyles='dotted')
+        ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                   100,cmap=cmap)
+        ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                          labels=['90','45','0','315','270','225','180','135'])
+        ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+        ax.grid(True)
+        ax.set_title("%s %ds period"%('Array response',1./(ind*df)))
+        ax.set_rmax(0.5)
+
+def polar_plot_test(beam,theta,slowness,indices,dt,nfft): 
     df = dt/nfft
     theta = theta[:,0]
     slowness = slowness[0,:]
@@ -443,7 +445,6 @@ def polar_plot_test(beam,theta,slowness,indices,resp=False):
         ax.set_title(str(1./(ind*df)))
         ax.grid(True)
         ax.set_rmax(0.5)
-    show()
 
 
 def syntrace(dist,wtype='rayleigh',wmodel='Herrmann'):
@@ -541,54 +542,143 @@ def syntest(theta,zetax):
         return
 
     return fseis
-    
-    return 1
+
+def test(datdir,nprep=False,nbeam=False,doplot=True):
+    """
+    Run synthetic test.
+    """
+    files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
+    if len(files) < 2:
+        print "not enough files in ",datdir
+        return
+    if datdir.endswith('/'):
+        datdir = datdir[0:-1]
+    temp = os.path.basename(datdir)
+    matfile1 = "%s_%s.mat"%('prep_beam',temp)
+    trZ = SacIO(files[0],headonly=True)
+    sample_f = int(round(1./trZ.delta))
+    newprep = not os.path.isfile(matfile1)
+    if nprep:
+        newprep = True
+    fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
+                                                                     nhours=1,fmax=sample_f,
+                                                                     fact=sample_f,
+                                                                     tempfilter=True,new=newprep)
+    zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+    seis = syntest(theta,zetax)
+    matfile2 = "%s_%s.mat"%('test_beam',temp)
+    nstat, ntimes, nsub, nfft = seis.shape
+    indices = arange(nfft)
+    newbeam = not os.path.isfile(matfile2)
+    if nbeam:
+        newbeam = True
+    beam = beamforming(seis,slowness,zetax,theta.size,dt,indices,
+                              new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
+    if doplot:
+        polar_plot_test(beam,theta,slowness,indices[1::],dt,nfft)
+        show()
+
+
+def response(datdir,nprep=False,nbeam=False,doplot=True):
+    """
+    Calculate the theoretical array response
+    """
+    files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
+    if len(files) < 2:
+        print "not enough files in ",datdir
+        return
+    if datdir.endswith('/'):
+        datdir = datdir[0:-1]
+    temp = os.path.basename(datdir)
+    matfile1 = "%s_%s.mat"%('prep_beam',temp)
+    trZ = SacIO(files[0],headonly=True)
+    sample_f = int(round(1./trZ.delta))
+    newprep = not os.path.isfile(matfile1)
+    if nprep:
+        newprep = True
+    fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
+                                                                     nhours=1,fmax=sample_f,
+                                                                     fact=sample_f,
+                                                                     tempfilter=True,new=newprep)
+    zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+    matfile2 = "%s_%s.mat"%('array_response',temp)
+    nstat, ntimes, nsub, nfft = fseis.shape
+    slowness = arange(0.03,0.505,0.005)
+    slowness = slowness.reshape((1,slowness.size))
+    indices = arange(nfft)
+    newbeam = not os.path.isfile(matfile2)
+    if nbeam:
+        newbeam = True
+    beam = arr_resp(nfft,dt,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
+                    new=newbeam,matfile=matfile2,src=False)
+    polar_plot_resp(beam,theta,slowness,dt,nfft)
+    show()
+
+def main(datdir,nprep=False,nbeam=False,doplot=True):
+    files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
+    if len(files) < 2:
+        print "not enough files in ",datdir
+        return
+    if datdir.endswith('/'):
+        datdir = datdir[0:-1]
+    temp = os.path.basename(datdir)
+    matfile1 = "%s_%s.mat"%('prep_beam',temp)
+    trZ = SacIO(files[0],headonly=True)
+    sample_f = int(round(1./trZ.delta))
+    newprep = not os.path.isfile(matfile1)
+    if nprep:
+        newprep = True
+    fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
+                                                                     nhours=1,fmax=sample_f,
+                                                                     fact=sample_f,
+                                                                     tempfilter=True,new=newprep)
+    zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
+    matfile2 = "%s_%s.mat"%('beam',temp)
+    newbeam = not os.path.isfile(matfile2)
+    if nbeam:
+        newbeam = True
+    nsources,ntimes,nsub,nfft = fseis.shape
+    df = dt/nfft
+    periods = [6.]
+    indices = [int(1./(p*df)) for p in periods]
+    beam = beamforming(fseis,slowness,zetax,theta.size,dt,indices,
+                              new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
+#        #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
+    if doplot:
+        polar_plot(beam,theta,slowness,dt,nfft,'rayleigh')
+        show()
+
 
 if __name__ == '__main__':
-    if 0:
-        if DEBUG:
-            print 'preparing raw data'
-        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-        #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
-        files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
-        matfile = 'prep_beam_2001_2_22.mat'
-        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=True)
-        if DEBUG:
-            print 'calculating steering vector'
-        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
-        if DEBUG:
-            print 'beamforming'
-        #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
-        nsources,ntimes,nsub,nfft = fseis.shape
-        df = dt/nfft
-        periods = [6.]
-        indices = [int(1./(p*df)) for p in periods]
-        beam = beamforming(fseis,slowness,zetax,theta.size,dt,indices,new=True,matfile='6s_average_beam.mat')
-        polar_plot(beam,theta,slowness,resp=False)
-    if 0:
-        Ntimes, freqs, slons, slats, seis,meanlat,meanlon = read_matfiles()
-        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
-        beam = beamforming(seis,freqs,slowness,zetax,theta.size,Ntimes,new=False,matfile='6s_average_beam.mat')
-        polar_plot(beam,theta,slowness,resp=True)
+    from optparse import OptionParser
+    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
+    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
+    parser = OptionParser()
+    parser.add_option("-t","--test",dest="test",action="store_true",
+                      help="Run a synthetic test using the given network layout.",
+                      default=False)
+    parser.add_option("-b","--beam",dest="beam",action="store_true",
+                      help="Recalculate beam.",
+                      default=False)
+    parser.add_option("-d","--data",dest="data",action="store_true",
+                      help="Prepare data.",
+                      default=False)
 
-    if 0:
-        arr_resp(freqs,slowness,zetax,theta,sta_origin_x,sta_origin_y,
-                 matfile='array_response_start.mat',new=False,src=True,
-                 fout='array_response_start.pdf')
+    parser.add_option("--noplot",dest="plot",action="store_false",
+                      help="Don't plot anything.",
+                      default=True)
 
-
-    if 1:
-        datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-        #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
-        files = glob.glob(os.path.join(datdir,'ft_grid*.HHZ.SAC'))
-        matfile = 'prep_beam_2001_2_22.mat'
-        fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile,onebit=False,tempfilter=True,new=False)
-        zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
-        fseis = syntest(theta,zetax)
-        dt = 1.0
-        nsources,ntimes,nsub,nfft = fseis.shape
-        df = dt/nfft
-        indices = arange(nfft)
-        beam = beamforming(fseis,slowness,zetax,theta.size,dt,
-                           indices,new=True,matfile='test_beam.mat')
-        polar_plot_test(beam,theta,slowness,indices[1::],resp=False)
+    parser.add_option("--resp",dest="aresp",action="store_true",
+                      help="Calculate array response.",
+                      default=False)
+    
+    (opts,args) = parser.parse_args()
+    if opts.test:
+        datdir = args[0]
+        test(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
+    elif opts.aresp:
+        datdir = args[0]
+        response(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
+    else:
+        datdir = args[0]
+        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
