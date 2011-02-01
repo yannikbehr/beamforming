@@ -10,8 +10,8 @@ import glob
 import obspy.sac
 from obspy.sac import *
 from obspy.core import read
-import matplotlib
-matplotlib.use('Agg')
+#import matplotlib
+#matplotlib.use('Agg')
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 from pylab import *
@@ -188,7 +188,7 @@ def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,fr
                         e_steer=exp(-1j*zetax*omega/velocity)
                         e_steerT=e_steer.T.copy()
                         #beam[:,cc,tt,ww] += sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
-                        beam[:,cc,tt,ww] += diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
+                        beam[:,cc,tt,ww] += diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2)/nsub
         if not DEBUG:
             pbar.finish()
         sio.savemat(matfile,{'beam':beam})
@@ -447,7 +447,7 @@ def polar_plot_test(beam,theta,slowness,indices,dt,nfft):
         cmap = cm.get_cmap('jet')
         ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
                     100,cmap=cmap,antialiased=True,
-                    linewidths=0.1,linstyles='dotted')
+                    linstyles='dotted')
         ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
                    100,cmap=cmap)
         ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
