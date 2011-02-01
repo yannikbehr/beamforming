@@ -187,7 +187,8 @@ def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,fr
                         velocity = 1./slowness[0][cc]*1000
                         e_steer=exp(-1j*zetax*omega/velocity)
                         e_steerT=e_steer.T.copy()
-                        beam[:,cc,tt,ww] += sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
+                        #beam[:,cc,tt,ww] += sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
+                        beam[:,cc,tt,ww] += diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
         if not DEBUG:
             pbar.finish()
         sio.savemat(matfile,{'beam':beam})
