@@ -12,6 +12,8 @@ from obspy.sac import *
 from obspy.core import read
 import matplotlib
 matplotlib.use('Agg')
+from matplotlib.colorbar import ColorbarBase
+from matplotlib.colors import Normalize
 from pylab import *
 import obspy.signal
 from obspy.signal.invsim import cosTaper
@@ -350,7 +352,9 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
         tre = tre.mean(axis=2)
         tre = tre-tre.max()
         fig = figure(figsize=(6,6))
-        ax = fig.add_subplot(1,1,1,projection='polar')
+        #ax = fig.add_subplot(1,1,1,projection='polar')
+        cax = fig.add_axes([0.85, 0.2, 0.05, 0.5])
+        ax  = fig.add_axes([0.10, 0.1, 0.70, 0.7], polar=True)
         cmap = cm.get_cmap('jet')
         ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
                     100,cmap=cmap,antialiased=True,
@@ -363,6 +367,8 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
         ax.grid(True)
         ax.set_title("%s %ds period"%(wtype,1./(ind*df)))
         ax.set_rmax(0.5)
+        ColorbarBase(cax, cmap=cmap,
+                     norm=Normalize(vmin=tre.min(), vmax=tre.max()))
         if fout is not None:
             savefig(fout)
 
