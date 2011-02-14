@@ -8,8 +8,9 @@ import sys
 import glob
 from obspy.sac import *
 from obspy.core import read
-import matplotlib
-matplotlib.use('Agg')
+if os.environ.has_key('SGE_TASK_ID'):
+    import matplotlib
+    matplotlib.use('Agg')
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 from pylab import *
@@ -27,7 +28,7 @@ import progressbar as pg
 rcParams = {'backend':'Agg'}
 
 DEBUG = False
-def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=True):
+def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False):
     if new:
         ntimes = int(round(24/nhours))
         step = int(nhours*3600*fmax/fact)
@@ -291,6 +292,9 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=Non
             daz = az*pi/180.-pi
             R = cos(daz)*N + sin(daz)*E
             T = -sin(daz)*N + cos(daz)*E
+            ### ignore amplitude and keep only phase
+            R = exp(angle(R)*1j)
+            T = exp(angle(T)*1j)
             dist = zetax[i,:]
             #for ww in [ind]:
             for ww in indices:
@@ -496,6 +500,7 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
     seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile1,
                                                                    nhours=1,fmax=sample_f,
                                                                    fact=sample_f,new=newprep)
+    print meanlat, meanlon
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
     matfile2 = "%s_%s.mat"%('array_response',temp)
     nstat, ntimes, nsub, nfft = seisn.shape
@@ -548,6 +553,9 @@ def test(datdir,nprep=False,nbeam=False,doplot=True):
 def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
     filesN = glob.glob(os.path.join(datdir,'ft_*.*HN.SAC'))
     filesE = glob.glob(os.path.join(datdir,'ft_*.*HE.SAC'))
+    if len(filesN) < 10 or len(filesE) < 10:
+        print "not enough files in ",datdir
+        return
     if datdir.endswith('/'):
         datdir = datdir[0:-1]
     temp = os.path.basename(datdir)
