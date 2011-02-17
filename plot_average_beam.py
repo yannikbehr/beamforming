@@ -13,13 +13,13 @@ from matplotlib import rcParams
 
 def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
     df = dt/nfft
-    periods = [6.]
-    periods = [4.,5.,6.,7.,8.,9.,10.]
+    periods = [8.]
+    #periods = [4.,5.,6.,7.,8.,9.,10.]
     idx = [int(1./(p*df)) for p in periods]
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre.mean(axis=2)
-        tre = tre-tre.max()
+        #tre = tre-tre.max()
         #tre = log10(abs(tre))
         fig = figure(figsize=(6,6))
         cax = fig.add_axes([0.85, 0.2, 0.05, 0.5])
@@ -50,22 +50,23 @@ def polar_plot_panel(beam,theta,slowness,dt,nfft,wtype,fout=None):
     rcParams['figure.subplot.wspace'] = 0.29
     df = dt/nfft
     periods = [6.]
-    periods = [5.,6.,7.,8.,9.,10.]
+    periods = [5.,6.,7.,8.,9.,10.,12.,15.,18.]
     idx = [int(1./(p*df)) for p in periods]
     cnt = 1
     cmap = cm.get_cmap('jet')
-    fig = figure(figsize=(10,8))
+    fig = figure(figsize=(10,10))
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre.mean(axis=2)
-        tre = tre-tre.max()
+        #tre = tre-tre.max()
         #tre = log10(abs(tre))
-        ax = fig.add_subplot(2,3,cnt,projection='polar')
+        ax = fig.add_subplot(3,3,cnt,projection='polar')
         cnt += 1
-        ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+        inds = where(slowness > 0.2)
+        ax.contourf((theta[::-1]+90.)*pi/180.,slowness[inds],tre[:,inds[0]].T,
                     100,cmap=cmap,antialiased=True,
                     linstyles='dotted')
-        ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+        ax.contour((theta[::-1]+90.)*pi/180.,slowness[inds],tre[:,inds[0]].T,
                    100,cmap=cmap)
         ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
                           labels=['90','45','0','315','270','225','180','135'])
@@ -79,25 +80,25 @@ def polar_plot_panel(beam,theta,slowness,dt,nfft,wtype,fout=None):
 
 if __name__ == '__main__':
     dirn = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/beamforming/beams'
-    dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
-    fl = glob.glob(os.path.join(dirn,'beam_2001_*.mat'))
+    #dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
+    fl = glob.glob(os.path.join(dirn,'beam_h*.mat'))
     if 1:
         avbeam = None
         for _f in fl:
             print _f
-            beam = sio.loadmat(_f)['beam']
+            beam = sio.loadmat(_f)['beamt']
             if avbeam is None:
                 avbeam = beam
             else:
                 avbeam += beam
         avbeam /= len(fl)
-        sio.savemat(os.path.join(dirn,'average_beam_vertical.mat'),{'avbeam':avbeam})
+        sio.savemat(os.path.join(dirn,'average_beam_transverse.mat'),{'avbeam':avbeam})
     else:
-        avbeam = sio.loadmat(os.path.join(dirn,'average_beam_vertical.mat'))['avbeam']
+        avbeam = sio.loadmat(os.path.join(dirn,'average_beam_transverse.mat'))['avbeam']
     dt = 1.0
     theta= arange(0,365,5)
     nfft = 128
     slowness = arange(0.125,0.51,0.01)
     #polar_plot(avbeam,theta,slowness,dt,nfft,'rayleigh')
-    polar_plot_panel(avbeam,theta,slowness,dt,nfft,'rayleigh (Z)')
+    polar_plot_panel(avbeam,theta,slowness,dt,nfft,'Love (T)')
     show()

@@ -315,8 +315,8 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=Non
                             velocity = 1./slowness[0][cc]*1000
                             e = exp(-1j*dist*omega/velocity)
                             eT = e.T.copy()
-                            beamr[i,cc,tt,ww] += (abs(asarray(dot(conjugate(eT),dot(covr,e).T)))**2)/nsub
-                            beamt[i,cc,tt,ww] += (abs(asarray(dot(conjugate(eT),dot(covt,e).T)))**2)/nsub
+                            beamr[i,cc,tt,ww] += (1./(nstat*nstat)*abs(asarray(dot(conjugate(eT),dot(covr,e).T)))**2)/nsub
+                            beamt[i,cc,tt,ww] += (1./(nstat*nstat)*abs(asarray(dot(conjugate(eT),dot(covt,e).T)))**2)/nsub
                             #beam[i,cc,tt] = abs(dot(Y,conjugate(e)))**2
         if not DEBUG:
             pbar.finish()
@@ -337,7 +337,7 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre.mean(axis=2)
-        tre = tre-tre.max()
+        #tre = tre-tre.max()
         fig = figure(figsize=(6,6))
         #ax = fig.add_subplot(1,1,1,projection='polar')
         cax = fig.add_axes([0.85, 0.2, 0.05, 0.5])
@@ -550,10 +550,10 @@ def test(datdir,nprep=False,nbeam=False,doplot=True):
         polar_plot_test(beamt,theta,slowness,indices[1::],'love',dt,nfft)
         show()
 
-def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
+def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     filesN = glob.glob(os.path.join(datdir,'ft_*.*HN.SAC'))
     filesE = glob.glob(os.path.join(datdir,'ft_*.*HE.SAC'))
-    if len(filesN) < 10 or len(filesE) < 10:
+    if len(filesN) < nostat or len(filesE) < nostat:
         print "not enough files in ",datdir
         return
     if datdir.endswith('/'):
@@ -577,7 +577,7 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
     nsources,ntimes,nsub,nfft = seisn.shape
     df = dt/nfft
     periods = [6.]
-    periods = [4.,5.,6.,7.,8.,9.,10.]
+    #periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
     indices = [int(1./(p*df)) for p in periods]
     beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,indices,
                               new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
@@ -615,6 +615,9 @@ if __name__ == '__main__':
     parser.add_option("--resp",dest="aresp",action="store_true",
                       help="Calculate array response.",
                       default=False)
+    parser.add_option("--nstat",dest="nstat",
+                      help="Minimum number of stations.",
+                      default=20)
     
     (opts,args) = parser.parse_args()
     if opts.test:
@@ -625,4 +628,5 @@ if __name__ == '__main__':
         response(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
     else:
         datdir = args[0]
-        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,save=opts.save)
+        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,
+             save=opts.save,nostat=int(opts.nstat))
