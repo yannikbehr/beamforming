@@ -80,7 +80,7 @@ def polar_plot_panel(beam,theta,slowness,dt,nfft,wtype,fout=None):
 
 if __name__ == '__main__':
     dirn = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/beamforming/beams'
-    #dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
+    dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
     fl = glob.glob(os.path.join(dirn,'beam_h*.mat'))
     if 1:
         avbeam = None
