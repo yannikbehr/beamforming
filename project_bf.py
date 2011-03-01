@@ -13,8 +13,6 @@ import glob
 import tempfile
 import cStringIO
 import sys
-sys.path.append('/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/niwam_data/')
-from plot_average_wave_data import get_wave_average
 os.environ['GMTHOME'] = '/usr/local/gmt/'
 
 def get_coastline():
@@ -106,7 +104,9 @@ def plot_cl(nval,ni_cl,ind,fout,text,beams,wavedat,doshow=False):
     nfiles,ncoord,nfreq,dum = nval.shape
     for _if in xrange(nfiles):
         fstr = cStringIO.StringIO()
-        #nval[_if,:,ind,2] /= nval[_if,:,ind,2].max()
+        nval[_if,:,ind,2] /= nval[_if,:,ind,2].max()
+        nval_min = nval[_if,:,ind,2].min()
+        nval_max = nval[_if,:,ind,2].max()
         for _i in range(nval.shape[1])[0:ni_cl.shape[0]-1]:
             lon0,lat0,val0 = nval[_if,_i,ind,:]
             lon1,lat1,val1 = nval[_if,_i+1,ind,:]
@@ -116,7 +116,6 @@ def plot_cl(nval,ni_cl,ind,fout,text,beams,wavedat,doshow=False):
             lon1,lat1,val1 = nval[_if,_i+1,ind,:]
             fstr.write("> -Z%s\n%.4f\t%.4f\n%.4f\t%.4f\n"%((val0+val1)/2.,lon0,lat0,lon1,lat1))
 
-        fstrni, fstrsi, swh = get_wave_average(beams,wavedat)
         gmt = GMT()
         cptfile = gmt.tempfilename()
         cptfile_swh = gmt.tempfilename()
@@ -125,19 +124,14 @@ def plot_cl(nval,ni_cl,ind,fout,text,beams,wavedat,doshow=False):
         anot = 'a5f2'
         scalebar = '2.c/-1.6c/4c/.2ch'
         scalebar_swh = '7.5c/-1.6c/4c/.2ch'
-        gmt.makecpt(C='seis',I=True,T='%f/%f/0.1'%(nval[_if,:,ind,2].min(),nval[_if,:,ind,2].max()),
+        gmt.makecpt(C='seis',I=True,T='%f/%f/0.1'%(nval_min,nval_max),
                     D=True,out_filename=cptfile)
-        #gmt.makecpt(C='seis',I=True,T='%f/%f/0.1'%(swh.min(),swh.max()),
-        #            D=True,out_filename=cptfile_swh)
         gmt.makecpt(C='seis',I=True,T='0.2/1/0.05',D=True,out_filename=cptfile_swh)
         gmt.psbasemap(R=rng,J=scl,B=anot,G='white')
         gmt.psxy(R=True,J=True,m=True,W='2',C=cptfile,in_string=fstr.getvalue())
-        #gmt.psxy(R=True,J=True,m=True,W='4,.',C=cptfile_swh,in_string=fstrsi.getvalue())
-        #gmt.psxy(R=True,J=True,m=True,W='4,.',C=cptfile_swh,in_string=fstrni.getvalue())
         textstring = """160 -35 12 0 1 LB %s"""%text
         gmt.pstext(R=True,J=True,D='j0.5',G='0/0/0',N=True,in_string=textstring)
-        gmt.psscale(C=cptfile,D=scalebar,B='%f::/::'%10.)
-        #gmt.psscale(C=cptfile_swh,D=scalebar_swh,B='%f::/:WAVE:'%.2)
+        gmt.psscale(C=cptfile,D=scalebar,B='%f::/::'%.2)
         fout += '%03d.eps'%(_if+1)
         if os.path.isfile(fout):
             os.remove(fout)
