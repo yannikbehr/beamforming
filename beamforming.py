@@ -10,13 +10,14 @@ import glob
 import obspy.sac
 from obspy.sac import *
 from obspy.core import read
-#import matplotlib
-#matplotlib.use('Agg')
+if os.environ.has_key('SGE_TASK_ID'):
+    import matplotlib
+    matplotlib.use('Agg')
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 from pylab import *
 import obspy.signal
-from obspy.signal.invsim import cosTaper
+from obspy.signal.invsim import cosTaper, detrend
 import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
@@ -30,8 +31,8 @@ import progressbar as pg
 rcParams = {'backend':'Agg'}
 
 DEBUG = False
-def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
-              tempfilter=False,fact=10,new=True):
+def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
+              tempfilter=False,specwhite=True,fact=10,new=True):
     if new:
         ntimes = int(round(24/nhours))
         step = nhours*3600*fmax/fact
@@ -58,7 +59,10 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
             df = tr.stats.sampling_rate
             dt = tr.stats.delta
             seis0 = zeros(24*3600*int(df))
-            seis0[0:npts] = tr.data
+            taper = cosTaper(tr.stats.npts)
+            tr.data -= tr.data.mean()
+            detrend(tr.data)
+            seis0[0:npts] = tr.data*taper
             seis0 -= seis0.mean()
             for j in xrange(ntimes):
                 ilow = j*step
@@ -100,7 +104,8 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=True,
         if np.isnan(fseis).any():
             print "NaN found"
             return
-
+        if specwhite:
+            fseis = exp(angle(fseis)*1j)
 
         LonLref= 165
         LonUref= 179.9
@@ -350,7 +355,7 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
     slowness = slowness[0,:]
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
-        tre = tre.mean(axis=2)
+        tre = tre[:,:,0:22].mean(axis=2)
         tre = tre-tre.max()
         fig = figure(figsize=(6,6))
         #ax = fig.add_subplot(1,1,1,projection='polar')
@@ -627,7 +632,7 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
 
 def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
     files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
-    if len(files) < 2:
+    if len(files) < 10:
         print "not enough files in ",datdir
         return
     if datdir.endswith('/'):
