@@ -107,6 +107,7 @@ def plot_cl(nval,ni_cl,ind,fout,text,beams,wavedat,doshow=False):
         nval[_if,:,ind,2] /= nval[_if,:,ind,2].max()
         nval_min = nval[_if,:,ind,2].min()
         nval_max = nval[_if,:,ind,2].max()
+        nval[_if,:,ind,2] = (nval[_if,:,ind,2] - nval_min)/(nval_max - nval_min)
         for _i in range(nval.shape[1])[0:ni_cl.shape[0]-1]:
             lon0,lat0,val0 = nval[_if,_i,ind,:]
             lon1,lat1,val1 = nval[_if,_i+1,ind,:]
@@ -119,18 +120,20 @@ def plot_cl(nval,ni_cl,ind,fout,text,beams,wavedat,doshow=False):
         gmt = GMT()
         cptfile = gmt.tempfilename()
         cptfile_swh = gmt.tempfilename()
-        rng = '160./179/-48/-32.'
+        rng = '160./179/-50/-32.'
         scl = 'M10c'
         anot = 'a5f2'
         scalebar = '2.c/-1.6c/4c/.2ch'
         scalebar_swh = '7.5c/-1.6c/4c/.2ch'
-        gmt.makecpt(C='seis',I=True,T='%f/%f/0.1'%(nval_min,nval_max),
+        gmt.makecpt(C='seis',I=True,T='%f/%f/0.1'%(0,1),
                     D=True,out_filename=cptfile)
         gmt.makecpt(C='seis',I=True,T='0.2/1/0.05',D=True,out_filename=cptfile_swh)
         gmt.psbasemap(R=rng,J=scl,B=anot,G='white')
         gmt.psxy(R=True,J=True,m=True,W='2',C=cptfile,in_string=fstr.getvalue())
         textstring = """160 -35 12 0 1 LB %s"""%text
         gmt.pstext(R=True,J=True,D='j0.5',G='0/0/0',N=True,in_string=textstring)
+        ctr_file = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/niwam_data/etopo5_south_pacific_bathymetry/bath_etopo_nz.grd'
+        gmt.grdcontour(ctr_file,J=True,R=True,A='-',L='-150.1/-149.9',C=10)
         gmt.psscale(C=cptfile,D=scalebar,B='%f::/::'%.2)
         fout += '%03d.eps'%(_if+1)
         if os.path.isfile(fout):
