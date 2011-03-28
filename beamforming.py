@@ -193,7 +193,7 @@ def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,fr
                         e_steer=exp(-1j*zetax*omega/velocity)
                         e_steerT=e_steer.T.copy()
                         #beam[:,cc,tt,ww] += sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
-                        beam[:,cc,tt,ww] += diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2)/nsub
+                        beam[:,cc,tt,ww] += 1./(nstat*nstat)*diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2)/nsub
         if not DEBUG:
             pbar.finish()
         sio.savemat(matfile,{'beam':beam})
@@ -356,7 +356,7 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre[:,:,0:22].mean(axis=2)
-        tre = tre-tre.max()
+        #tre = tre-tre.max()
         fig = figure(figsize=(6,6))
         #ax = fig.add_subplot(1,1,1,projection='polar')
         cax = fig.add_axes([0.85, 0.2, 0.05, 0.5])
@@ -630,10 +630,11 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
     polar_plot_resp(beam,theta,slowness,dt,nfft)
     show()
 
-def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
+def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
-    if len(files) < 10:
+    if len(files) < nostat:
         print "not enough files in ",datdir
+        print len(files), nostat
         return
     if datdir.endswith('/'):
         datdir = datdir[0:-1]
@@ -656,7 +657,7 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False):
     nsources,ntimes,nsub,nfft = fseis.shape
     df = dt/nfft
     periods = [6.]
-    periods = [4.,5.,6.,7.,8.,9.,10.]
+    periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
     indices = [int(1./(p*df)) for p in periods]
     beam = beamforming(fseis,slowness,zetax,theta.size,dt,indices,
                               new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
@@ -693,6 +694,9 @@ if __name__ == '__main__':
     parser.add_option("--resp",dest="aresp",action="store_true",
                       help="Calculate array response.",
                       default=False)
+    parser.add_option("--nstat",dest="nstat",
+                      help="Minimum number of stations.",
+                      default=20)
     
     (opts,args) = parser.parse_args()
     if opts.test:
@@ -703,4 +707,5 @@ if __name__ == '__main__':
         response(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
     else:
         datdir = args[0]
-        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,save=opts.save)
+        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,
+             save=opts.save,nostat=int(opts.nstat))

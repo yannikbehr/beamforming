@@ -12,6 +12,6 @@ LIST=/Volumes/Wanaka_01/yannik/start/beamforming/list_all_months_start.txt
 ROOT=/Volumes/Wanaka_01/yannik/start
 DIR=$(cat $LIST | head -n $SGE_TASK_ID | tail -n 1)
 INPUT=${ROOT}/${DIR}
-/usr/local/python2/bin/python2.7 /Users/home/yannik78/dev/proc-scripts_git/beamforming/hbeamforming.py  $INPUT -s
+/usr/local/python2/bin/python2.7 /Users/home/yannik78/dev/proc-scripts_git/beamforming/hbeamforming.py  $INPUT -s -b --nstat=10
 
 
