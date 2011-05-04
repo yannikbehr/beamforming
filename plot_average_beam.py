@@ -1,6 +1,7 @@
 #!/usr/bin/env mypython
 """
-Plot output from beamforming.
+Plot output from beamforming averaged either over a month or over the
+whole deployment time.
 """
 from pylab import *
 import scipy.io as sio
@@ -10,6 +11,7 @@ import os
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 from matplotlib import rcParams
+from obspy.core.utcdatetime import UTCDateTime
 
 def mycmp(beama, beamb):
     tmp = os.path.basename(beama).split('_')
@@ -103,6 +105,7 @@ def monthly_average(fl,months,comp,new=True):
     fl.sort(cmp=mycmp)
     if new:
         for month in months.keys():
+            print month
             avbeam = None
             cnt = 0
             for _f in fl:
@@ -110,9 +113,10 @@ def monthly_average(fl,months,comp,new=True):
                     print _f
                     if comp == 'transverse':
                         beam = sio.loadmat(_f)['beamt']
-                    if comp == 'vertical':
+                    elif comp == 'vertical':
                         beam = sio.loadmat(_f)['beam']
                     else:
+                        print 'comp: ',comp
                         print 'comp has to be transverse or vertical'
                         return
                     
@@ -121,6 +125,7 @@ def monthly_average(fl,months,comp,new=True):
                     else:
                         avbeam += beam
                     cnt += 1
+            if avbeam is None: continue
             avbeam /= cnt
             sio.savemat(os.path.join(dirn,'average_beam_%s_%s.mat'%(comp,month)),{'avbeam':avbeam})
             dt = 1.0
@@ -151,6 +156,7 @@ def average(fl,comp,new=True):
             if comp == 'vertical':
                 beam = sio.loadmat(_f)['beam']
             else:
+                print 'comp: ',comp
                 print 'comp has to be transverse or vertical'
                 return
             if avbeam is None:
@@ -181,13 +187,13 @@ if __name__ == '__main__':
             fl = glob.glob(os.path.join(dirn,'beam_200*.mat'))
     if start:
         dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
-        months = {'march':3,'april':4,'may':5,'june':6,'july':7,'august':8,'september':9}
+        months = {'january':1,'february':2,'march':3,'april':4,'may':5,'june':6}
         if comp == 'transverse':
             fl = glob.glob(os.path.join(dirn,'beam_h*.mat'))
         if comp == 'vertical':
             fl = glob.glob(os.path.join(dirn,'beam_200*.mat'))
-    if 0:
-        monthly_average(fl,months,comp,new=False)
+    if 1:
+        monthly_average(fl,months,comp,new=True)
     if 0:
         average(fl,comp,new=False)
 
