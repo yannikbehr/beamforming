@@ -11,6 +11,28 @@ from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 from matplotlib import rcParams
 
+def mycmp(beama, beamb):
+    tmp = os.path.basename(beama).split('_')
+    year = int(tmp[-6])
+    month = int(tmp[-5])
+    day = int(tmp[-4])
+    datea = UTCDateTime(year,month,day,0,0,0,0).getTimeStamp()
+    tmp = os.path.basename(beamb).split('_')
+    year = int(tmp[-6])
+    month = int(tmp[-5])
+    day = int(tmp[-4])
+    dateb = UTCDateTime(year,month,day,0,0,0,0).getTimeStamp()
+    if datea > dateb: return 1
+    if datea < dateb: return -1
+    if datea == dateb: return 0
+
+def getmonth(beam):
+    tmp = os.path.basename(beam).split('_')
+    year = int(tmp[-6])
+    month = int(tmp[-5])
+    day = int(tmp[-4])
+    return month
+
 def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
     df = dt/nfft
     periods = [8.]
@@ -77,28 +99,98 @@ def polar_plot_panel(beam,theta,slowness,dt,nfft,wtype,fout=None):
     if fout is not None:
         savefig(fout)
 
+def monthly_average(fl,months,comp,new=True):
+    fl.sort(cmp=mycmp)
+    if new:
+        for month in months.keys():
+            avbeam = None
+            cnt = 0
+            for _f in fl:
+                if getmonth(_f) == months[month]:
+                    print _f
+                    if comp == 'transverse':
+                        beam = sio.loadmat(_f)['beamt']
+                    if comp == 'vertical':
+                        beam = sio.loadmat(_f)['beam']
+                    else:
+                        print 'comp has to be transverse or vertical'
+                        return
+                    
+                    if avbeam is None:
+                        avbeam = beam
+                    else:
+                        avbeam += beam
+                    cnt += 1
+            avbeam /= cnt
+            sio.savemat(os.path.join(dirn,'average_beam_%s_%s.mat'%(comp,month)),{'avbeam':avbeam})
+            dt = 1.0
+            theta= arange(0,365,5)
+            nfft = 128
+            slowness = arange(0.125,0.51,0.01)
+            fout = os.path.join(dirn,'average_beam_%s_%s.png'%(comp,month))
+            polar_plot_panel(avbeam,theta,slowness,dt,nfft,'%s %s'%(comp,month),fout=fout)
+    else:
+        for month in months.keys():
+            matfile = os.path.join(dirn,'average_beam_%s_%s.mat'%(comp,month))
+            print matfile
+            avbeam = sio.loadmat(matfile)['avbeam']
+            dt = 1.0
+            theta= arange(0,365,5)
+            nfft = 128
+            slowness = arange(0.125,0.51,0.01)
+            fout = os.path.join(dirn,'average_beam_%s_%s.png'%(comp,month))
+            polar_plot_panel(avbeam,theta,slowness,dt,nfft,'%s %s'%(comp,month),fout=fout)
 
-if __name__ == '__main__':
-    dirn = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/beamforming/beams'
-    #dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
-    fl = glob.glob(os.path.join(dirn,'beam_h*.mat'))
-    if 1:
+def average(fl,comp,new=True):
+    if new:
         avbeam = None
         for _f in fl:
             print _f
-            beam = sio.loadmat(_f)['beamt']
+            if comp == 'transverse':
+                beam = sio.loadmat(_f)['beamt']
+            if comp == 'vertical':
+                beam = sio.loadmat(_f)['beam']
+            else:
+                print 'comp has to be transverse or vertical'
+                return
             if avbeam is None:
                 avbeam = beam
             else:
                 avbeam += beam
         avbeam /= len(fl)
-        sio.savemat(os.path.join(dirn,'average_beam_transverse.mat'),{'avbeam':avbeam})
+        sio.savemat(os.path.join(dirn,'average_beam_%s.mat'%(comp)),{'avbeam':avbeam})
     else:
-        avbeam = sio.loadmat(os.path.join(dirn,'average_beam_transverse.mat'))['avbeam']
+        avbeam = sio.loadmat(os.path.join(dirn,'average_beam_%s.mat'%(comp)))['avbeam']
     dt = 1.0
     theta= arange(0,365,5)
     nfft = 128
     slowness = arange(0.125,0.51,0.01)
     #polar_plot(avbeam,theta,slowness,dt,nfft,'rayleigh')
-    polar_plot_panel(avbeam,theta,slowness,dt,nfft,'Love (T)')
-    show()
+    polar_plot_panel(avbeam,theta,slowness,dt,nfft,'%s '%(comp))
+
+if __name__ == '__main__':
+    taranaki = False
+    start = True
+    comp = 'transverse'
+    if taranaki:
+        dirn = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/beamforming/beams'
+        months = {'march':3,'april':4,'may':5,'june':6,'july':7,'august':8,'september':9}
+        if comp == 'transverse':
+            fl = glob.glob(os.path.join(dirn,'beam_h*.mat'))
+        if comp == 'vertical':
+            fl = glob.glob(os.path.join(dirn,'beam_200*.mat'))
+    if start:
+        dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
+        months = {'march':3,'april':4,'may':5,'june':6,'july':7,'august':8,'september':9}
+        if comp == 'transverse':
+            fl = glob.glob(os.path.join(dirn,'beam_h*.mat'))
+        if comp == 'vertical':
+            fl = glob.glob(os.path.join(dirn,'beam_200*.mat'))
+    if 0:
+        monthly_average(fl,months,comp,new=False)
+    if 0:
+        average(fl,comp,new=False)
+
+### Bash lines to print the output of monthly_average
+# for i in average*transverse*png;do convert $i -resize 75% `echo $i|cut -d. -f1`_small.png;done
+# for i in average*transverse*small.png; do lpr -PCO505 $i;done

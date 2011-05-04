@@ -196,7 +196,8 @@ def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,fr
                         beam[:,cc,tt,ww] += 1./(nstat*nstat)*diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2)/nsub
         if not DEBUG:
             pbar.finish()
-        sio.savemat(matfile,{'beam':beam})
+        if matfile is not None:
+            sio.savemat(matfile,{'beam':beam})
     else:
         beam = sio.loadmat(matfile)['beam']
     return beam
@@ -313,17 +314,17 @@ def beamforming_c(seis1,seissmall,slowness,zetax,nsources,dt,theta,new=True,
         beam = sio.loadmat(matfile)['beam']
     return beam
 
-def arr_resp(nfft,dt,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
-             new=True,matfile=None,src=False):
+def arr_resp(nfft,dt,nstat,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
+             new=True,matfile=None,src=False,src_param=(90,3000)):
     """
     calculate array response
     """
     if new:
-        theta1 = 90
-        zeta_x = -cos(theta1*pi/180.)
-        zeta_y = -sin(theta1*pi/180.)
-        zeta_src = zeta_x*sta_origin_x + zeta_y*sta_origin_y
-        c1 = 3000
+        if src_param is not None:
+            theta1,c1 = src_param
+            zeta_x = -cos(theta1*pi/180.)
+            zeta_y = -sin(theta1*pi/180.)
+            zeta_src = zeta_x*sta_origin_x + zeta_y*sta_origin_y
         freqs = fftfreq(nfft,dt)
         beam = zeros((zetax.shape[0],slowness.size,nfft))
         for ww in indices:
@@ -335,12 +336,16 @@ def arr_resp(nfft,dt,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
                 if src:
                     e_src = exp(-1j*zeta_src*omega/c1).T
                     Y = multiply(ones((zetax.shape[1],1),'complex128'),atleast_2d(e_src).T)
-                    Y = ones((zetax.shape[1],1),'complex128')
+                    #Y = ones((zetax.shape[1],1),'complex128')
                     R = dot(Y,conjugate(Y).T)
                 else:
                     R = ones((zetax.shape[1],zetax.shape[1]))
-                beam[:,cc,ww] = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
-        sio.savemat(matfile,{'beam':beam})
+                #beam[:,cc,ww] = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+
+                beam[:,cc,ww] += 1./(nstat*nstat)*diag(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2)
+
+        if matfile is not None:
+            sio.savemat(matfile,{'beam':beam})
         return beam
     else:
         beam = sio.loadmat(matfile)['beam']
@@ -378,29 +383,41 @@ def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
         if fout is not None:
             savefig(fout)
 
-def polar_plot_resp(beam,theta,slowness,dt,nfft):
+def polar_plot_resp(beam,theta,slowness,dt,nfft,periods=[6.],polar=True):
     df = dt/nfft
-    periods = [6.]
     idx = [int(1./(p*df)) for p in periods]
     theta = theta[:,0]
     slowness = slowness[0,:]
     for ind in idx:
         tre = squeeze(beam[:,:,ind])
-        tre = tre-tre.max()
+        #tre = tre-tre.max()
         fig = figure(figsize=(6,6))
-        ax = fig.add_subplot(1,1,1,projection='polar')
+        if polar:
+            ax = fig.add_subplot(1,1,1,projection='polar')
+        else:
+            ax = fig.add_subplot(1,1,1)
         cmap = cm.get_cmap('jet')
-        ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                    100,cmap=cmap,antialiased=True,
-                    linstyles='dotted')
-        ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
-                   100,cmap=cmap)
-        ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
-                          labels=['90','45','0','315','270','225','180','135'])
-        ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+        if polar:
+            ax.contourf((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                        100,cmap=cmap,antialiased=True,
+                        linstyles='dotted')
+            ax.contour((theta[::-1]+90.)*pi/180.,slowness,tre.T,
+                       100,cmap=cmap)
+        else:
+            ax.contourf(theta,slowness,tre.T,100,cmap=cmap,antialiased=True,
+                        linstyles='dotted')
+            ax.contour(theta,slowness,tre.T,100,cmap=cmap)
+            
+        if polar:
+            ax.set_thetagrids([0,45.,90.,135.,180.,225.,270.,315.],
+                              labels=['90','45','0','315','270','225','180','135'])
+            ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
+            ax.set_rmax(0.5)
+        else:
+            ax.set_xlabel('Azimuth [degrees]')
+            ax.set_ylabel('Slowness [s/km]')
         ax.grid(True)
         ax.set_title("%s %ds period"%('Array response',1./(ind*df)))
-        ax.set_rmax(0.5)
 
 def polar_plot_test(beam,theta,slowness,indices,dt,nfft): 
     df = dt/nfft
@@ -625,7 +642,7 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
     newbeam = not os.path.isfile(matfile2)
     if nbeam:
         newbeam = True
-    beam = arr_resp(nfft,dt,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
+    beam = arr_resp(nfft,dt,nstat,indices,slowness,zetax,theta,sta_origin_x,sta_origin_y,
                     new=newbeam,matfile=matfile2,src=False)
     polar_plot_resp(beam,theta,slowness,dt,nfft)
     show()

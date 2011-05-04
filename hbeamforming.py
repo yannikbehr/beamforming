@@ -577,7 +577,7 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     nsources,ntimes,nsub,nfft = seisn.shape
     df = dt/nfft
     periods = [6.]
-    #periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
+    periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
     indices = [int(1./(p*df)) for p in periods]
     beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,indices,
                               new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
