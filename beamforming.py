@@ -163,7 +163,7 @@ def calc_steer(slats,slons):
 
 
 
-def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,freq_int=(0.02,0.4)):
+def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,freq_int=(0.02,0.4),laura=True):
     if new:
         #nfft,ntimes,nsub,nstat = seis.shape
         nstat,ntimes,nsub,nfft = seis.shape
@@ -192,8 +192,10 @@ def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,fr
                         velocity = 1./slowness[0][cc]*1000
                         e_steer=exp(-1j*zetax*omega/velocity)
                         e_steerT=e_steer.T.copy()
-                        #beam[:,cc,tt,ww] += sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
-                        beam[:,cc,tt,ww] += 1./(nstat*nstat)*diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2)/nsub
+                        if laura:
+                            beam[:,cc,tt,ww] += sum(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2,axis=1)/nsub
+                        else:
+                            beam[:,cc,tt,ww] += 1./(nstat*nstat)*diag(abs(asarray(dot(conjugate(e_steer),dot(R,e_steerT))))**2)/nsub
         if not DEBUG:
             pbar.finish()
         if matfile is not None:
@@ -548,7 +550,7 @@ def syntrace(dist,wtype='rayleigh',wmodel='Herrmann'):
                  '5. 6.5 3.8 2.5 100. 200. 0.0 0.0 1.0 1.0\n',
                  '0. 8.0 4.7 3.3 500.0 900.0 0.0 0.0 1.0 1.0\n']
         time = linspace(0,256,256)
-        z,r,t = herman_syn(model,dist,npts=256)
+        z,r,t, pR, vR, pL, vL = herman_syn(model,dist,npts=256)
         return time,z
     else:
         print "wmodel has to be either Herrmann or Aki"
