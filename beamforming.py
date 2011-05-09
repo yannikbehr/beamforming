@@ -32,7 +32,7 @@ rcParams = {'backend':'Agg'}
 
 DEBUG = False
 def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
-              tempfilter=False,specwhite=True,fact=10,new=True):
+              tempfilter=True,specwhite=False,fact=10,new=True):
     if new:
         ntimes = int(round(24/nhours))
         step = nhours*3600*fmax/fact
@@ -54,7 +54,9 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
             slats = append(slats,tr.stats.sac.stla)
             if staname not in stations:
                 stations.append(staname)
-            tr.downsample(decimation_factor=fact, strict_length=True)
+            tr.filter("bandpass",freqmin=0.02,freqmax=0.4,corners=4,zerophase=True)
+            if (tr.stats.sampling_rate - 1.0) > 0.0001:
+                tr.downsample(decimation_factor=fact, strict_length=True)
             npts = tr.stats.npts
             df = tr.stats.sampling_rate
             dt = tr.stats.delta
@@ -62,7 +64,11 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
             taper = cosTaper(tr.stats.npts)
             tr.data -= tr.data.mean()
             detrend(tr.data)
-            seis0[0:npts] = tr.data*taper
+            istart = int(round(((tr.stats.starttime.hour*60+tr.stats.starttime.minute)*60\
+                          +tr.stats.starttime.second)*df))
+            print i,_f, df
+            print istart, npts, seis0.size, tr.data.size, taper.size
+            seis0[istart:(istart+npts)] = tr.data*taper
             seis0 -= seis0.mean()
             for j in xrange(ntimes):
                 ilow = j*step
@@ -136,8 +142,8 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
 
 
 def calc_steer(slats,slons):
-    #theta= arange(0,362,2)
-    theta= arange(0,365,5)
+    theta= arange(0,362,2)
+    #theta= arange(0,365,5)
     theta = theta.reshape((theta.size,1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
@@ -650,7 +656,8 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
     show()
 
 def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
-    files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
+    #files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
+    files = glob.glob(os.path.join(datdir,'[!^ft]*.*HZ.SAC'))
     if len(files) < nostat:
         print "not enough files in ",datdir
         print len(files), nostat
