@@ -32,7 +32,7 @@ rcParams = {'backend':'Agg'}
 
 DEBUG = False
 def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
-              tempfilter=True,specwhite=False,fact=10,new=True):
+              tempfilter=False,specwhite=True,fact=10,new=True,fftpower=7,freq_int=(0.02,0.4)):
     if new:
         ntimes = int(round(24/nhours))
         step = nhours*3600*fmax/fact
@@ -40,13 +40,13 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
         stations = []
         slons = array([])
         slats = array([])
-        nfiles = len(files)
-        #seisband = zeros((step,ntimes,nfiles))
+        nfiles = len(files)-1
         seisband = zeros((nfiles,ntimes,step))
-        sigmas = []
+        freqs = (fmax/fact)/2.*np.arange(1,2**(fftpower-1)+1)/2**(fftpower-1)
         for i,_f in enumerate(files):
             tr = read(_f)[0]
             staname = tr.stats.station
+            if staname == 'LUGT': continue
             kcomp = tr.stats.channel
             slat = tr.stats.sac.stla
             slon = tr.stats.sac.stlo
@@ -54,63 +54,57 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
             slats = append(slats,tr.stats.sac.stla)
             if staname not in stations:
                 stations.append(staname)
+            tr.data -= tr.data.mean()
             tr.filter("bandpass",freqmin=0.02,freqmax=0.4,corners=4,zerophase=True)
             if (tr.stats.sampling_rate - 1.0) > 0.0001:
-                tr.downsample(decimation_factor=fact, strict_length=True)
+                tr.downsample(decimation_factor=fact, strict_length=True,no_filter=True)
+            else:
+                continue
             npts = tr.stats.npts
             df = tr.stats.sampling_rate
             dt = tr.stats.delta
             seis0 = zeros(24*3600*int(df))
             taper = cosTaper(tr.stats.npts)
-            tr.data -= tr.data.mean()
-            detrend(tr.data)
+            #detrend(tr.data)
             istart = int(round(((tr.stats.starttime.hour*60+tr.stats.starttime.minute)*60\
                           +tr.stats.starttime.second)*df))
-            print i,_f, df
-            print istart, npts, seis0.size, tr.data.size, taper.size
-            seis0[istart:(istart+npts)] = tr.data*taper
+            #seis0[istart:(istart+npts)] = tr.data*taper
+            seis0[istart:(istart+npts)] = tr.data
             seis0 -= seis0.mean()
             for j in xrange(ntimes):
                 ilow = j*step
                 iup = (j+1)*step
-                #seisband[:,j,i] = seis0[ilow:iup]
-                #seisband[:,j,i] -= seisband[:,j,i].mean()
-                #sigmas.append(seisband[:,j,i].std())
                 seisband[i,j,:] = seis0[ilow:iup]
                 seisband[i,j,:] -= seisband[i,j,:].mean()
-                sigmas.append(seisband[i,j,:].std())
                 if onebit:
-                    #seisband[:,j,i] = sign(seisband[:,j,i])
                     seisband[i,j,:] = sign(seisband[i,j,:])
-        if tempfilter:
-            sgm = ma.masked_equal(array(sigmas),0.).compressed()
-            sigma = sqrt(sum(sgm**2)/sgm.size)
-            threshold = threshold_std*sigma
-            seisband = where(abs(seisband) > threshold,threshold*sign(seisband),seisband)
-            seisband = apply_along_axis(lambda e: e-e.mean(),2,seisband)
+            if tempfilter:
+                sigmas = seisband[i,:,:].std(axis=1,ddof=1)
+                sgm = ma.masked_equal(array(sigmas),0.).compressed()
+                sigma = sqrt(sum(sgm**2)/sgm.size)
+                threshold = threshold_std*sigma
+                seisband[i] = where(abs(seisband[i]) > threshold,threshold*sign(seisband[i]),seisband[i])
+                seisband[i] = apply_along_axis(lambda e: e-e.mean(),1,seisband[i])
 
         if 1:
-            fftpower = 7
             ismall = 2**fftpower
             ipick = arange(ismall)
             taper = cosTaper(len(ipick))
             n=nhours*3600*df
             nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
-            #seissmall = zeros((len(ipick),ntimes,nsub,nfiles))
             seissmall = zeros((nfiles,ntimes,nsub,len(ipick)))
             for ii in xrange(nfiles):
                 for jj in xrange(ntimes):
                     for kk in xrange(nsub):
-                        #seissmall[:,jj,kk,ii] = seisband[kk*ismall+ipick,jj,ii]
                         seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]*taper
             
-        #temp = fft(seissmall,n=2**fftpower,axis=0)
-        #fseis = temp.copy()
         fseis = fft(seissmall,n=2**fftpower,axis=3)
         if np.isnan(fseis).any():
             print "NaN found"
             return
         if specwhite:
+            ind = np.where((freqs>freq_int[0])&(freqs<freq_int[1]))[0]
+            fseis = fseis[:,:,:,ind]
             fseis = exp(angle(fseis)*1j)
 
         LonLref= 165
@@ -125,8 +119,8 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
         meanlat = slats.mean()
         meanlon = slons.mean()
 
-        sio.savemat(matfile,{'fseis':fseis,'seissmall':seissmall,'slats':slats,'slons':slons,'dt':dt})
-        return fseis, meanlat, meanlon, slats, slons, dt, seissmall
+        sio.savemat(matfile,{'fseis':fseis,'seissmall':seissmall,'slats':slats,'slons':slons,'dt':dt,'files':files,'freqs':freqs[ind]})
+        return fseis, freqs, meanlat, meanlon, slats, slons, dt, seissmall
     else:
         a = sio.loadmat(matfile)
         fseis = a['fseis']
@@ -134,11 +128,12 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
         slats = a['slats']
         slons = a['slons']
         dt = a['dt'][0][0]
+        freqs = a['freqs']
         slats = slats.reshape(slats.shape[0],)
         slons = slons.reshape(slons.shape[0],)
         meanlat = slats.mean()
         meanlon = slons.mean()
-        return fseis, meanlat, meanlon, slats, slons, dt, seissmall
+        return fseis, freqs, meanlat, meanlon, slats, slons, dt, seissmall
 
 
 def calc_steer(slats,slons):
@@ -162,18 +157,18 @@ def calc_steer(slats,slons):
     #dot product betwen zeta and x
     zetax = zeta_x*sta_origin_x+zeta_y*sta_origin_y
     #slowness in s/km
-    #slowness = arange(0.03,0.505,0.005)
-    slowness = arange(0.125,0.51,0.01)
+    slowness = arange(0.03,0.505,0.005)
+    #slowness = arange(0.125,0.51,0.01)
     slowness = slowness.reshape((1,slowness.size))
     return zetax,theta,slowness,sta_origin_x,sta_origin_y
 
 
 
-def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,freq_int=(0.02,0.4),laura=True):
+def beamforming(seis,freqs,slowness,zetax,nsources,dt,indices,new=True,matfile=None,laura=True):
     if new:
         #nfft,ntimes,nsub,nstat = seis.shape
         nstat,ntimes,nsub,nfft = seis.shape
-        freq = fftfreq(nfft,dt)
+        #freq = fftfreq(nfft,dt)
         beam = zeros((nsources,slowness.size,ntimes,nfft))
         if not DEBUG:
             widgets = ['vertical beamforming: ', pg.Percentage(), ' ', pg.Bar('#'),
@@ -181,7 +176,7 @@ def beamforming(seis,slowness,zetax,nsources,dt,indices,new=True,matfile=None,fr
             pbar = pg.ProgressBar(widgets=widgets, maxval=len(indices)*ntimes).start()
             count = 0
         for ww in indices:
-            FF = freq[ww]
+            FF = freqs[ww]
             for tt in xrange(ntimes):
                 if not DEBUG:
                     count +=1
@@ -360,10 +355,10 @@ def arr_resp(nfft,dt,nstat,indices,slowness,zetax,theta,sta_origin_x,sta_origin_
         return beam
         
 
-def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
+def polar_plot(beam,theta,freqs,slowness,dt,nfft,wtype,fout=None):
     df = dt/nfft
     periods = [6.]
-    idx = [int(1./(p*df)) for p in periods]
+    idx = [argmin(abs(freqs - 1./p)) for p in periods]
     theta = theta[:,0]
     slowness = slowness[0,:]
     for ind in idx:
@@ -671,10 +666,10 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     newprep = not os.path.isfile(matfile1)
     if nprep:
         newprep = True
-    fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
+    fseis,freqs, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
                                                                      nhours=1,fmax=sample_f,
                                                                      fact=sample_f,
-                                                                     tempfilter=True,new=newprep)
+                                                                     tempfilter=False,new=newprep)
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
     matfile2 = "%s_%s.mat"%('beam',temp)
     newbeam = not os.path.isfile(matfile2)
@@ -683,21 +678,22 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     nsources,ntimes,nsub,nfft = fseis.shape
     df = dt/nfft
     periods = [6.]
-    periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
-    indices = [int(1./(p*df)) for p in periods]
-    beam = beamforming(fseis,slowness,zetax,theta.size,dt,indices,
-                              new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
+    #periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
+    #indices = [int(1./(p*df)) for p in periods]
+    indices = [argmin(abs(freqs - 1./p)) for p in periods]
+    beam = beamforming(fseis,freqs,slowness,zetax,theta.size,dt,indices,
+                              new=newbeam,matfile=matfile2)
 #        #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
     if doplot:
         fout = None
         if save:
             fout = matfile2.replace('.mat','_vertical.png')
-        polar_plot(beam,theta,slowness,dt,nfft,'rayleigh',fout=fout)
+        polar_plot(beam,theta,freqs,slowness,dt,nfft,'rayleigh',fout=fout)
         if not save:
             show()
 
 
-if __name__ == '__main__':
+def proc_main():
     from optparse import OptionParser
     #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
     #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
@@ -735,3 +731,14 @@ if __name__ == '__main__':
         datdir = args[0]
         main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,
              save=opts.save,nostat=int(opts.nstat))
+
+if __name__ == '__main__':
+    try:
+        __IPYTHON__
+    except:
+        proc_main()
+    else:
+        print 'running in ipython'
+        datdir = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/sacfiles/5Hz/2002/Jul/2002_7_12_0_0_0'
+        main(datdir,nbeam=True,nprep=True,doplot=False,save=False,nostat=20)
+
