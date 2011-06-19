@@ -168,8 +168,6 @@ def calc_steer(slats,slons):
     slowness = slowness.reshape((1,slowness.size))
     return zetax,theta,slowness,sta_origin_x,sta_origin_y
 
-
-
 def beamforming(seis,freqs,slowness,theta,zetax,nsources,dt,indices,new=True,matfile=None,laura=False):
     if new:
         nstat,ntimes,nsub,nfft = seis.shape
@@ -204,118 +202,6 @@ def beamforming(seis,freqs,slowness,theta,zetax,nsources,dt,indices,new=True,mat
             pbar.finish()
         if matfile is not None:
             sio.savemat(matfile,{'beam':beam,'theta':theta,'slowness':slowness,'freqs':freqs})
-    else:
-        beam = sio.loadmat(matfile)['beam']
-    return beam
-
-
-def ndarray2ptr2D(ndarray):
-    """
-    Construct ** pointer for ctypes from numpy.ndarray
-    """
-    ptr = C.c_void_p
-    dim1, dim2 = ndarray.shape
-    voids = []
-    return (ptr * dim1)(*[row.ctypes.data_as(ptr) for row in ndarray])
-
-def ndarray2ptr3D(ndarray):
-    """
-    Construct *** pointer for ctypes from numpy.ndarray
-    """
-    ptr = C.c_void_p
-    dim1, dim2, _dim3 = ndarray.shape
-    voids = []
-    for i in xrange(dim1):
-        row = ndarray[i]
-        p = (ptr * dim2)(*[col.ctypes.data_as(ptr) for col in row])
-        voids.append(C.cast(p, C.c_void_p))
-    return (ptr * dim1)(*voids)
-
-def ndarray2ptr4D(ndarray):
-    """
-    Construct **** pointer for ctypes from numpy.ndarray
-    """
-    dim1,dim2,dim3,dim4 = ndarray.shape
-    ptr = C.c_void_p
-    voids1 = []
-    for i in xrange(dim1):
-        voids2 = []
-        for j in xrange(dim2):
-            row = ndarray[i][j]
-            p = (ptr * dim3)(*[col.ctypes.data_as(ptr) for col in row])
-            voids2.append(C.cast(p, C.c_void_p))
-        p2 = (ptr*dim2)(*voids2)
-        voids1.append(C.cast(p2,C.c_void_p))
-    return (ptr*dim1)(*voids1)
-
-def beamforming_c(seis1,seissmall,slowness,zetax,nsources,dt,theta,new=True,
-                  matfile=None,freq_int=[0.02,0.4]):
-    lib = C.cdll.LoadLibrary('./beam_c.so')
-    digfreq = int(round(1./dt))
-    lib.beam.argtypes = [ \
-        C.c_void_p,
-        C.c_void_p,
-        C.c_void_p,
-        np.ctypeslib.ndpointer(dtype='float64', ndim=1, flags='C_CONTIGUOUS'),
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_double,
-        C.c_double
-        ]
-    #nfft,ntimes,nsub,nstat = seissmall.shape
-    nstat,ntimes,nsub,nfft = seissmall.shape
-    df = digfreq/float(nfft)
-    wlow = int(freq_int[0]/df+0.5)
-    whigh = int(freq_int[1]/df+0.5)
-    beam = zeros((nfft,nsources,slowness.size))
-    beam_p = ndarray2ptr3D(beam)
-    zetax_p = ndarray2ptr2D(zetax)
-    nslow = slowness.size
-    if 0:
-        seissmall_p = ndarray2ptr4D(seissmall)
-        errcode = lib.beam_fft(C.byref(seissmall_p),C.byref(beam_p),C.byref(zetax_p),
-                           slowness[0],nslow,nsources,nfft,nstat,ntimes,nsub,digfreq,
-                           freq_int[0],freq_int[1])
-        print 'python',seissmall[3,4,6,100]
-        f = open('beam_c.dump','w')
-        pickle.dump(beam,f)
-        f.close()
-    else:
-        f = open('beam_c.dump')
-        beam = pickle.load(f)
-        
-    if new:
-        beam = zeros((nsources,slowness.size,ntimes,nfft))
-        beam_p = ndarray2ptr4D(beam)
-        ntimes = 1
-        nsub = 1
-        fnc = lib.beam
-        fnc.argtypes = [\
-            np.ctypeslib.ndpointer(dtype='complex128',ndim=4,flags='aligned, contiguous'),
-            C.POINTER(C.c_long),
-            C.POINTER(C.c_long),
-            C.c_void_p,
-            C.c_void_p,
-            np.ctypeslib.ndpointer(dtype='float64', ndim=1, flags='C_CONTIGUOUS'),
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            np.ctypeslib.ndpointer(dtype='float64', ndim=1, flags='C_CONTIGUOUS')
-            ]
-        errcode = fnc(seis1,seis1.ctypes.strides,seis1.ctypes.shape,
-                      C.byref(beam_p),C.byref(zetax_p),slowness[0],
-                      nslow,nsources,nfft,nstat,ntimes,nsub,digfreq,array(freq_int))
-
-        sio.savemat(matfile,{'beam':beam})
     else:
         beam = sio.loadmat(matfile)['beam']
     return beam
@@ -686,7 +572,6 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     indices = [argmin(abs(freqs - 1./p)) for p in periods]
     beam = beamforming(fseis,freqs,slowness,theta,zetax,theta.size,dt,indices,
                               new=newbeam,matfile=matfile2,laura=True)
-#        #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
     if doplot:
         fout = None
         if save:
