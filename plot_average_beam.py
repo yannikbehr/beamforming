@@ -175,9 +175,9 @@ def average(fl,comp,new=True):
     polar_plot_panel(avbeam,theta,slowness,dt,nfft,'%s '%(comp))
 
 if __name__ == '__main__':
-    taranaki = False
-    start = True
-    comp = 'transverse'
+    taranaki = True
+    start = False
+    comp = 'vertical'
     if taranaki:
         dirn = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/beamforming/beams'
         months = {'march':3,'april':4,'may':5,'june':6,'july':7,'august':8,'september':9}
