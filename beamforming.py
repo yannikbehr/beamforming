@@ -108,9 +108,9 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
         if np.isnan(fseis).any():
             print "NaN found"
             return
+        ind = np.where((freqs>freq_int[0])&(freqs<freq_int[1]))[0]
+        fseis = fseis[:,:,:,ind]
         if specwhite:
-            ind = np.where((freqs>freq_int[0])&(freqs<freq_int[1]))[0]
-            fseis = fseis[:,:,:,ind]
             fseis = exp(angle(fseis)*1j)
 
         LonLref= 165
@@ -558,8 +558,9 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     fseis,freqs, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
                                                                            nhours=1,fmax=sample_f,
                                                                            fact=sample_f,
-                                                                           tempfilter=False,
-                                                                           new=newprep,laura=False)
+                                                                           tempfilter=True,
+                                                                           new=newprep,laura=True,
+                                                                           specwhite=False)
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
     matfile2 = "%s_%s.mat"%('beam',temp)
     newbeam = not os.path.isfile(matfile2)
@@ -568,8 +569,8 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     nsources,ntimes,nsub,nfft = fseis.shape
     df = dt/nfft
     periods = [6.]
-    #periods = [6., 1./0.148]
-    periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
+    periods = [6., 1./0.148]
+    #periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
     indices = [argmin(abs(freqs - 1./p)) for p in periods]
     beam = beamforming(fseis,freqs,slowness,theta,zetax,theta.size,dt,indices,
                               new=newbeam,matfile=matfile2,laura=False)
