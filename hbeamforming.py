@@ -28,7 +28,7 @@ import progressbar as pg
 rcParams = {'backend':'Agg'}
 
 DEBUG = False
-def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False):
+def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False,fftpower=7,laura=False):
     if new:
         ntimes = int(round(24/nhours))
         step = int(nhours*3600*fmax/fact)
@@ -38,13 +38,24 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False):
         seisbandn = zeros((nfiles,ntimes,step))
         seisbande = zeros((nfiles,ntimes,step))
         sigmas = []
+        if laura:
+            freqs = (fmax/fact)/2.*np.arange(1,2**(fftpower-1)+1)/2**(fftpower-1)
+        else:
+            freqs = fftfreq(2**fftpower,1./(fmax/fact))
         for i,_ftup in enumerate(files):
             trn = read(_ftup[0])[0]
             tre = read(_ftup[1])[0]
             slons = append(slons,trn.stats.sac.stlo)
             slats = append(slats,trn.stats.sac.stla)
-            trn.downsample(decimation_factor=fact, strict_length=True)
-            tre.downsample(decimation_factor=fact, strict_length=True)
+            trn.data -= trn.data.mean()
+            trn.filter("bandpass",freqmin=0.02,freqmax=0.4,corners=4,zerophase=True)
+            tre.data -= tre.data.mean()
+            tre.filter("bandpass",freqmin=0.02,freqmax=0.4,corners=4,zerophase=True)
+            if (trn.stats.sampling_rate - 1.0) > 0.0001 and (tre.stats.sampling_rate - 1.0) > 0.0001:
+                trn.downsample(decimation_factor=fact, strict_length=True,no_filter=True)
+                tre.downsample(decimation_factor=fact, strict_length=True,no_filter=True)
+            else:
+                continue
             nptsn = trn.stats.npts
             nptse = tre.stats.npts
             df = trn.stats.sampling_rate
@@ -67,22 +78,18 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False):
                 seisbande[i,j,:] = sign(seisbande[i,j,:])
 
 
-        if 1:
-            fftpower = 7
-            ismall = 2**fftpower
-            ipick = arange(ismall)
-            n=nhours*3600*df
-            taper = cosTaper(len(ipick))
-            nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
-            #seissmall = zeros((len(ipick),ntimes,nsub,nfiles))
-            seissmalln = zeros((nfiles,ntimes,nsub,len(ipick)))
-            seissmalle = zeros((nfiles,ntimes,nsub,len(ipick)))
-            for ii in xrange(nfiles):
-                for jj in xrange(ntimes):
-                    for kk in xrange(nsub):
-                        #seissmall[:,jj,kk,ii] = seisband[kk*ismall+ipick,jj,ii]
-                        seissmalln[ii,jj,kk,:] = seisbandn[ii,jj,kk*ismall+ipick]*taper
-                        seissmalle[ii,jj,kk,:] = seisbande[ii,jj,kk*ismall+ipick]*taper
+        ismall = 2**fftpower
+        ipick = arange(ismall)
+        n=nhours*3600*df
+        taper = cosTaper(len(ipick))
+        nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
+        seissmalln = zeros((nfiles,ntimes,nsub,len(ipick)))
+        seissmalle = zeros((nfiles,ntimes,nsub,len(ipick)))
+        for ii in xrange(nfiles):
+            for jj in xrange(ntimes):
+                for kk in xrange(nsub):
+                    seissmalln[ii,jj,kk,:] = seisbandn[ii,jj,kk*ismall+ipick]*taper
+                    seissmalle[ii,jj,kk,:] = seisbande[ii,jj,kk*ismall+ipick]*taper
 
         LonLref= 165
         LonUref= 179.9
@@ -96,8 +103,8 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False):
         meanlat = slats.mean()
         meanlon = slons.mean()
 
-        sio.savemat(matfile,{'seissmalln':seissmalln,'seissmalle':seissmalle,'slats':slats,'slons':slons,'dt':dt})
-        return seissmalln, seissmalle, meanlat, meanlon, slats, slons, dt
+        sio.savemat(matfile,{'seissmalln':seissmalln,'seissmalle':seissmalle,'slats':slats,'slons':slons,'dt':dt,'files': files,'freqs':freqs})
+        return seissmalln, seissmalle, freqs, meanlat, meanlon, slats, slons, dt
     else:
         a = sio.loadmat(matfile,struct_as_record=False)
         seissmalln = a['seissmalln']
@@ -105,16 +112,17 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False):
         slats = a['slats']
         slons = a['slons']
         dt = a['dt'][0][0]
+        freqs = a['freqs']
         slats = slats.reshape(slats.shape[0],)
         slons = slons.reshape(slons.shape[0],)
         meanlat = slats.mean()
         meanlon = slons.mean()
-        return seissmalln, seissmalle, meanlat, meanlon, slats, slons, dt
+        return seissmalln, seissmalle, freqs, meanlat, meanlon, slats, slons, dt
 
 
 def calc_steer(slats,slons):
-    #theta= arange(0,362,2)
-    theta= arange(0,365,5)
+    theta= arange(0,362,2)
+    #theta= arange(0,365,5)
     theta = theta.reshape((theta.size,1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
@@ -133,8 +141,8 @@ def calc_steer(slats,slons):
     #dot product betwen zeta and x
     zetax = zeta_x*sta_origin_x+zeta_y*sta_origin_y
     #slowness in s/km
-    #slowness = arange(0.03,0.505,0.005)
-    slowness = arange(0.125,0.51,0.01)
+    slowness = arange(0.03,0.505,0.005)
+    #slowness = arange(0.125,0.51,0.01)
     slowness = slowness.reshape((1,slowness.size))
     return zetax,theta,slowness,sta_origin_x,sta_origin_y
 
@@ -152,12 +160,13 @@ def mkfilelist(filesN, filesE):
             trE = SacIO(_fE,headonly=True)
             stE = trE.kstnm.rstrip()
             dtE = trE.delta
-            if dtE != dtN:
-                print "sampling intervals are not identical for %s and %s"%(_fN,_fE)
-                return
             if stN == stE:
-                newlist.append((_fN,_fE))
-                break
+                if dtE != dtN:
+                    print "sampling intervals are not identical for %s and %s"%(_fN,_fE)
+                    break
+                else:
+                    newlist.append((_fN,_fE))
+                    break
             
     return newlist,1./dtN
 
@@ -272,7 +281,7 @@ def syntest(theta,zetax):
     e = rtraces*cos(phi) - ltraces*sin(phi)
     return n,e
 
-def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=None,freq_int=(0.1,0.4)):
+def beamforming(seisn,seise,freqs,slowness,zetax,theta,dt,periods,new=True,matfile=None,freq_int=(0.02,0.4)):
     if new:
         if not DEBUG:
             widgets = ['horizontal beamforming: ', pg.Percentage(), ' ', pg.Bar('#'),
@@ -280,12 +289,16 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=Non
             pbar = pg.ProgressBar(widgets=widgets, maxval=theta.size).start()
         nstat, ntimes, nsub, nfft = seisn.shape
         nsources = theta.size
-        freq = fftfreq(nfft,dt)
-        I = np.where((freq>freq_int[0]) & (freq<freq_int[1]))
         beamr = zeros((nsources,slowness.size,ntimes,nfft))
         beamt = zeros((nsources,slowness.size,ntimes,nfft))
         N = fft(seisn,n=nfft,axis=3)
         E = fft(seise,n=nfft,axis=3)
+        ind = np.where((freqs>freq_int[0])&(freqs<freq_int[1]))[0]
+        N = N[:,:,:,ind]
+        E = E[:,:,:,ind]
+        freqs = freqs[ind]
+        indices = [argmin(abs(freqs - 1./p)) for p in periods]
+
         for i,az in enumerate(theta):
             if not DEBUG:
                 pbar.update(i)
@@ -298,7 +311,7 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=Non
             dist = zetax[i,:]
             #for ww in [ind]:
             for ww in indices:
-                FF = freq[ww]
+                FF = freqs[ww]
                 omega = 2*pi*FF
                 for tt in xrange(ntimes):
                 #for tt in [0]:
@@ -320,20 +333,23 @@ def beamforming(seisn,seise,slowness,zetax,theta,dt,indices,new=True,matfile=Non
                             #beam[i,cc,tt] = abs(dot(Y,conjugate(e)))**2
         if not DEBUG:
             pbar.finish()
-        sio.savemat(matfile,{'beamr':beamr,'beamt':beamt})
+        sio.savemat(matfile,{'beamr':beamr,'beamt':beamt,'theta':theta,'slowness':slowness,'freqs':freqs})
     else:
         a = sio.loadmat(matfile,struct_as_record=False)
         beamr = a['beamr']
         beamt = a['beamt']
-    return beamr, beamt
+        freqs = a['freqs']
+    return beamr, beamt, freqs
 
 
-def polar_plot(beam,theta,slowness,dt,nfft,wtype,fout=None):
+def polar_plot(beam,theta,freqs,slowness,dt,nfft,wtype,fout=None):
     df = dt/nfft
     periods = [6.]
     idx = [int(1./(p*df)) for p in periods]
+    idx = [argmin(abs(freqs - 1./p)) for p in periods]
     theta = theta[:,0]
     slowness = slowness[0,:]
+    print idx
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre.mean(axis=2)
@@ -551,8 +567,8 @@ def test(datdir,nprep=False,nbeam=False,doplot=True):
         show()
 
 def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
-    filesN = glob.glob(os.path.join(datdir,'ft_*.*HN.SAC'))
-    filesE = glob.glob(os.path.join(datdir,'ft_*.*HE.SAC'))
+    filesN = glob.glob(os.path.join(datdir,'[!^ft]*.*HN.SAC'))
+    filesE = glob.glob(os.path.join(datdir,'[!^ft]*.*HE.SAC'))
     if len(filesN) < nostat or len(filesE) < nostat:
         print "not enough files in ",datdir
         return
@@ -565,37 +581,34 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     newprep = not os.path.isfile(matfile1)
     if nprep:
         newprep = True
-    seisn, seise, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile1,
+    print nprep, newprep
+    seisn, seise, freqs, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile1,
                                                                    nhours=1,fmax=sample_f,
-                                                                   fact=sample_f,new=newprep)
+                                                                   fact=sample_f,new=newprep,
+                                                                   laura=False)
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
     matfile2 = "%s_%s.mat"%('beam_h',temp)
     newbeam = not os.path.isfile(matfile2)
-    
     if nbeam:
         newbeam = True
     nsources,ntimes,nsub,nfft = seisn.shape
-    df = dt/nfft
-    periods = [6.]
-    #periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
-    indices = [int(1./(p*df)) for p in periods]
-    beamr,beamt = beamforming(seisn,seise,slowness,zetax,theta,dt,indices,
-                              new=newbeam,freq_int=(0.1,0.4),matfile=matfile2)
+    #periods = [6.]
+    periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
+    beamr,beamt,freqs = beamforming(seisn,seise,freqs,slowness,zetax,theta,dt,periods,
+                              new=newbeam,matfile=matfile2)
     if doplot:
         fout = None
         if save:
             fout = matfile2.replace('.mat','_radial.png')
-        polar_plot(beamr,theta,slowness,dt,nfft,'rayleigh',fout=fout)
+        polar_plot(beamr,theta,freqs,slowness,dt,nfft,'rayleigh',fout=fout)
         if save:
             fout = matfile2.replace('.mat','_transverse.png')
-        polar_plot(beamt,theta,slowness,dt,nfft,'love',fout=fout)
+        polar_plot(beamt,theta,freqs,slowness,dt,nfft,'love',fout=fout)
         if not save:
             show()
 
-if __name__ == '__main__':
+def proc_main():
     from optparse import OptionParser
-    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
     parser = OptionParser()
     parser.add_option("-t","--test",dest="test",action="store_true",
                       help="Run a synthetic test using the given network layout.",
@@ -630,3 +643,14 @@ if __name__ == '__main__':
         datdir = args[0]
         main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,
              save=opts.save,nostat=int(opts.nstat))
+    
+
+if __name__ == '__main__':
+    try:
+        __IPYTHON__
+    except:
+        proc_main()
+    else:
+        print 'running in ipython'
+        #datdir = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/sacfiles/5Hz/2002/Jul/2002_7_12_0_0_0'
+        #main(datdir,nbeam=False,nprep=False,doplot=True,save=False,nostat=20)

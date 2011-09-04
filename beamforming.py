@@ -32,21 +32,22 @@ rcParams = {'backend':'Agg'}
 
 DEBUG = False
 def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
-              tempfilter=False,specwhite=True,fact=10,new=True,fftpower=7,freq_int=(0.02,0.4)):
+              tempfilter=False,specwhite=True,fact=10,new=True,fftpower=7,freq_int=(0.02,0.4),laura=False):
     if new:
         ntimes = int(round(24/nhours))
         step = nhours*3600*fmax/fact
-
         stations = []
         slons = array([])
         slats = array([])
-        nfiles = len(files)-1
+        nfiles = len(files)
         seisband = zeros((nfiles,ntimes,step))
-        freqs = (fmax/fact)/2.*np.arange(1,2**(fftpower-1)+1)/2**(fftpower-1)
+        if laura:
+            freqs = (fmax/fact)/2.*np.arange(1,2**(fftpower-1)+1)/2**(fftpower-1)
+        else:
+            freqs = fftfreq(2**fftpower,1./(fmax/fact))
         for i,_f in enumerate(files):
             tr = read(_f)[0]
             staname = tr.stats.station
-            if staname == 'LUGT': continue
             kcomp = tr.stats.channel
             slat = tr.stats.sac.stla
             slon = tr.stats.sac.stlo
@@ -69,7 +70,12 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
             istart = int(round(((tr.stats.starttime.hour*60+tr.stats.starttime.minute)*60\
                           +tr.stats.starttime.second)*df))
             #seis0[istart:(istart+npts)] = tr.data*taper
-            seis0[istart:(istart+npts)] = tr.data
+            try:
+                seis0[istart:(istart+npts)] = tr.data
+            except ValueError,e:
+                print _f
+                raise ValueError
+            
             seis0 -= seis0.mean()
             for j in xrange(ntimes):
                 ilow = j*step
@@ -86,25 +92,24 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
                 seisband[i] = where(abs(seisband[i]) > threshold,threshold*sign(seisband[i]),seisband[i])
                 seisband[i] = apply_along_axis(lambda e: e-e.mean(),1,seisband[i])
 
-        if 1:
-            ismall = 2**fftpower
-            ipick = arange(ismall)
-            taper = cosTaper(len(ipick))
-            n=nhours*3600*df
-            nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
-            seissmall = zeros((nfiles,ntimes,nsub,len(ipick)))
-            for ii in xrange(nfiles):
-                for jj in xrange(ntimes):
-                    for kk in xrange(nsub):
-                        seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]*taper
+        ismall = 2**fftpower
+        ipick = arange(ismall)
+        taper = cosTaper(len(ipick))
+        n=nhours*3600*df
+        nsub = int(np.floor(n/ismall)) # Number of time pieces -20 mins long each
+        seissmall = zeros((nfiles,ntimes,nsub,len(ipick)))
+        for ii in xrange(nfiles):
+            for jj in xrange(ntimes):
+                for kk in xrange(nsub):
+                    seissmall[ii,jj,kk,:] = seisband[ii,jj,kk*ismall+ipick]*taper
             
         fseis = fft(seissmall,n=2**fftpower,axis=3)
         if np.isnan(fseis).any():
             print "NaN found"
             return
+        ind = np.where((freqs>freq_int[0])&(freqs<freq_int[1]))[0]
+        fseis = fseis[:,:,:,ind]
         if specwhite:
-            ind = np.where((freqs>freq_int[0])&(freqs<freq_int[1]))[0]
-            fseis = fseis[:,:,:,ind]
             fseis = exp(angle(fseis)*1j)
 
         LonLref= 165
@@ -120,7 +125,7 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
         meanlon = slons.mean()
 
         sio.savemat(matfile,{'fseis':fseis,'seissmall':seissmall,'slats':slats,'slons':slons,'dt':dt,'files':files,'freqs':freqs[ind]})
-        return fseis, freqs, meanlat, meanlon, slats, slons, dt, seissmall
+        return fseis, freqs[ind], meanlat, meanlon, slats, slons, dt, seissmall
     else:
         a = sio.loadmat(matfile)
         fseis = a['fseis']
@@ -162,13 +167,9 @@ def calc_steer(slats,slons):
     slowness = slowness.reshape((1,slowness.size))
     return zetax,theta,slowness,sta_origin_x,sta_origin_y
 
-
-
-def beamforming(seis,freqs,slowness,zetax,nsources,dt,indices,new=True,matfile=None,laura=True):
+def beamforming(seis,freqs,slowness,theta,zetax,nsources,dt,indices,new=True,matfile=None,laura=False):
     if new:
-        #nfft,ntimes,nsub,nstat = seis.shape
         nstat,ntimes,nsub,nfft = seis.shape
-        #freq = fftfreq(nfft,dt)
         beam = zeros((nsources,slowness.size,ntimes,nfft))
         if not DEBUG:
             widgets = ['vertical beamforming: ', pg.Percentage(), ' ', pg.Bar('#'),
@@ -184,7 +185,6 @@ def beamforming(seis,freqs,slowness,zetax,nsources,dt,indices,new=True,matfile=N
             #for tt in [0]:
                 for TT in xrange(nsub):
                 #for TT in [0]:
-                    #Y = asmatrix(squeeze(seis[ww,tt,TT,:],))
                     Y = asmatrix(squeeze(seis[:,tt,TT,ww]))
                     YT = Y.T.copy()
                     R = dot(YT,conjugate(Y))
@@ -200,119 +200,7 @@ def beamforming(seis,freqs,slowness,zetax,nsources,dt,indices,new=True,matfile=N
         if not DEBUG:
             pbar.finish()
         if matfile is not None:
-            sio.savemat(matfile,{'beam':beam})
-    else:
-        beam = sio.loadmat(matfile)['beam']
-    return beam
-
-
-def ndarray2ptr2D(ndarray):
-    """
-    Construct ** pointer for ctypes from numpy.ndarray
-    """
-    ptr = C.c_void_p
-    dim1, dim2 = ndarray.shape
-    voids = []
-    return (ptr * dim1)(*[row.ctypes.data_as(ptr) for row in ndarray])
-
-def ndarray2ptr3D(ndarray):
-    """
-    Construct *** pointer for ctypes from numpy.ndarray
-    """
-    ptr = C.c_void_p
-    dim1, dim2, _dim3 = ndarray.shape
-    voids = []
-    for i in xrange(dim1):
-        row = ndarray[i]
-        p = (ptr * dim2)(*[col.ctypes.data_as(ptr) for col in row])
-        voids.append(C.cast(p, C.c_void_p))
-    return (ptr * dim1)(*voids)
-
-def ndarray2ptr4D(ndarray):
-    """
-    Construct **** pointer for ctypes from numpy.ndarray
-    """
-    dim1,dim2,dim3,dim4 = ndarray.shape
-    ptr = C.c_void_p
-    voids1 = []
-    for i in xrange(dim1):
-        voids2 = []
-        for j in xrange(dim2):
-            row = ndarray[i][j]
-            p = (ptr * dim3)(*[col.ctypes.data_as(ptr) for col in row])
-            voids2.append(C.cast(p, C.c_void_p))
-        p2 = (ptr*dim2)(*voids2)
-        voids1.append(C.cast(p2,C.c_void_p))
-    return (ptr*dim1)(*voids1)
-
-def beamforming_c(seis1,seissmall,slowness,zetax,nsources,dt,theta,new=True,
-                  matfile=None,freq_int=[0.02,0.4]):
-    lib = C.cdll.LoadLibrary('./beam_c.so')
-    digfreq = int(round(1./dt))
-    lib.beam.argtypes = [ \
-        C.c_void_p,
-        C.c_void_p,
-        C.c_void_p,
-        np.ctypeslib.ndpointer(dtype='float64', ndim=1, flags='C_CONTIGUOUS'),
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_int,
-        C.c_double,
-        C.c_double
-        ]
-    #nfft,ntimes,nsub,nstat = seissmall.shape
-    nstat,ntimes,nsub,nfft = seissmall.shape
-    df = digfreq/float(nfft)
-    wlow = int(freq_int[0]/df+0.5)
-    whigh = int(freq_int[1]/df+0.5)
-    beam = zeros((nfft,nsources,slowness.size))
-    beam_p = ndarray2ptr3D(beam)
-    zetax_p = ndarray2ptr2D(zetax)
-    nslow = slowness.size
-    if 0:
-        seissmall_p = ndarray2ptr4D(seissmall)
-        errcode = lib.beam_fft(C.byref(seissmall_p),C.byref(beam_p),C.byref(zetax_p),
-                           slowness[0],nslow,nsources,nfft,nstat,ntimes,nsub,digfreq,
-                           freq_int[0],freq_int[1])
-        print 'python',seissmall[3,4,6,100]
-        f = open('beam_c.dump','w')
-        pickle.dump(beam,f)
-        f.close()
-    else:
-        f = open('beam_c.dump')
-        beam = pickle.load(f)
-        
-    if new:
-        beam = zeros((nsources,slowness.size,ntimes,nfft))
-        beam_p = ndarray2ptr4D(beam)
-        ntimes = 1
-        nsub = 1
-        fnc = lib.beam
-        fnc.argtypes = [\
-            np.ctypeslib.ndpointer(dtype='complex128',ndim=4,flags='aligned, contiguous'),
-            C.POINTER(C.c_long),
-            C.POINTER(C.c_long),
-            C.c_void_p,
-            C.c_void_p,
-            np.ctypeslib.ndpointer(dtype='float64', ndim=1, flags='C_CONTIGUOUS'),
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            C.c_int,
-            np.ctypeslib.ndpointer(dtype='float64', ndim=1, flags='C_CONTIGUOUS')
-            ]
-        errcode = fnc(seis1,seis1.ctypes.strides,seis1.ctypes.shape,
-                      C.byref(beam_p),C.byref(zetax_p),slowness[0],
-                      nslow,nsources,nfft,nstat,ntimes,nsub,digfreq,array(freq_int))
-
-        sio.savemat(matfile,{'beam':beam})
+            sio.savemat(matfile,{'beam':beam,'theta':theta,'slowness':slowness,'freqs':freqs})
     else:
         beam = sio.loadmat(matfile)['beam']
     return beam
@@ -363,7 +251,7 @@ def polar_plot(beam,theta,freqs,slowness,dt,nfft,wtype,fout=None):
     slowness = slowness[0,:]
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
-        tre = tre[:,:,0:22].mean(axis=2)
+        tre = tre[:,:,:].mean(axis=2)
         #tre = tre-tre.max()
         fig = figure(figsize=(6,6))
         #ax = fig.add_subplot(1,1,1,projection='polar')
@@ -379,7 +267,7 @@ def polar_plot(beam,theta,freqs,slowness,dt,nfft,wtype,fout=None):
                           labels=['90','45','0','315','270','225','180','135'])
         ax.set_rgrids([0.1,0.2,0.3,0.4,0.5],labels=['0.1','0.2','0.3','0.4','0.5'],color='r')
         ax.grid(True)
-        ax.set_title("%s %ds period"%(wtype,1./(ind*df)))
+        ax.set_title("%s %ds period"%(wtype,1./(freqs[ind])))
         ax.set_rmax(0.5)
         ColorbarBase(cax, cmap=cmap,
                      norm=Normalize(vmin=tre.min(), vmax=tre.max()))
@@ -667,9 +555,11 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     if nprep:
         newprep = True
     fseis,freqs, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
-                                                                     nhours=1,fmax=sample_f,
-                                                                     fact=sample_f,
-                                                                     tempfilter=False,new=newprep)
+                                                                           nhours=1,fmax=sample_f,
+                                                                           fact=sample_f,
+                                                                           tempfilter=True,
+                                                                           new=newprep,laura=True,
+                                                                           specwhite=False)
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
     matfile2 = "%s_%s.mat"%('beam',temp)
     newbeam = not os.path.isfile(matfile2)
@@ -678,12 +568,11 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     nsources,ntimes,nsub,nfft = fseis.shape
     df = dt/nfft
     periods = [6.]
+    periods = [6., 1./0.148]
     #periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
-    #indices = [int(1./(p*df)) for p in periods]
     indices = [argmin(abs(freqs - 1./p)) for p in periods]
-    beam = beamforming(fseis,freqs,slowness,zetax,theta.size,dt,indices,
-                              new=newbeam,matfile=matfile2)
-#        #beam = beamforming_c(fseis,seissmall,slowness,zetax,theta.size,dt,theta,new=True,matfile='6s_short_beam_c.mat')
+    beam = beamforming(fseis,freqs,slowness,theta,zetax,theta.size,dt,indices,
+                              new=newbeam,matfile=matfile2,laura=False)
     if doplot:
         fout = None
         if save:
