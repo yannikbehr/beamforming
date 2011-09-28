@@ -31,7 +31,6 @@ import progressbar as pg
 rcParams = {'backend':'Agg'}
 
 DEBUG = False
-
 def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
               tempfilter=False,specwhite=True,fact=10,new=True,fftpower=7,freq_int=(0.02,0.4),laura=False):
     if new:
