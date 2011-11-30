@@ -7,7 +7,6 @@ next try to rewrite laura's beamformer
 import os
 import sys
 import glob
-import obspy.sac
 from obspy.sac import *
 from obspy.core import read
 if os.environ.has_key('SGE_TASK_ID'):
@@ -18,6 +17,7 @@ from matplotlib.colors import Normalize
 from pylab import *
 import obspy.signal
 from obspy.signal.invsim import cosTaper, detrend
+from obspy.signal.filter import bandpass
 import scipy.io as sio
 from matplotlib import cm, rcParams
 import ctypes as C
@@ -28,11 +28,13 @@ sys.path.append(os.path.join(os.environ['PROC_SRC'],'NA'))
 from herman_surface_wave import herman_syn
 from dinver_run import get_disp
 import progressbar as pg
+from smooth import smooth
 rcParams = {'backend':'Agg'}
 
 DEBUG = False
 def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
-              tempfilter=False,specwhite=True,fact=10,new=True,fftpower=7,freq_int=(0.02,0.4),laura=False):
+              tempfilter=False,specwhite=True,timenorm=False,fact=10,new=True,
+              fftpower=7,freq_int=(0.02,0.4),laura=False):
     if new:
         ntimes = int(round(24/nhours))
         step = nhours*3600*fmax/fact
@@ -69,6 +71,9 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
             #detrend(tr.data)
             istart = int(round(((tr.stats.starttime.hour*60+tr.stats.starttime.minute)*60\
                           +tr.stats.starttime.second)*df))
+            if timenorm:
+                smoothdata = smooth(abs(tr.data),window_len=257,window='flat')
+                tr.data /= smoothdata
             #seis0[istart:(istart+npts)] = tr.data*taper
             try:
                 seis0[istart:(istart+npts)] = tr.data
@@ -91,6 +96,7 @@ def prep_beam(files,matfile,nhours=1,fmax=10.,threshold_std=0.5,onebit=False,
                 threshold = threshold_std*sigma
                 seisband[i] = where(abs(seisband[i]) > threshold,threshold*sign(seisband[i]),seisband[i])
                 seisband[i] = apply_along_axis(lambda e: e-e.mean(),1,seisband[i])
+                
 
         ismall = 2**fftpower
         ipick = arange(ismall)
@@ -538,9 +544,9 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
     polar_plot_resp(beam,theta,slowness,dt,nfft)
     show()
 
-def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
+def main(datdir,files,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     #files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
-    files = glob.glob(os.path.join(datdir,'[!^ft]*.*HZ.SAC'))
+    #files = glob.glob(os.path.join(datdir,'[!^ft]*.*HZ.SAC'))
     if len(files) < nostat:
         print "not enough files in ",datdir
         print len(files), nostat
@@ -554,12 +560,14 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     newprep = not os.path.isfile(matfile1)
     if nprep:
         newprep = True
-    fseis,freqs, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,onebit=False,
+    fseis,freqs, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files,matfile1,
                                                                            nhours=1,fmax=sample_f,
+                                                                           new=newprep,laura=False,
                                                                            fact=sample_f,
+                                                                           onebit=False,
                                                                            tempfilter=True,
-                                                                           new=newprep,laura=True,
-                                                                           specwhite=False)
+                                                                           specwhite=False,
+                                                                           timenorm=False)
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
     matfile2 = "%s_%s.mat"%('beam',temp)
     newbeam = not os.path.isfile(matfile2)
@@ -610,6 +618,9 @@ def proc_main():
                       default=20)
     
     (opts,args) = parser.parse_args()
+
+    flist = sys.stdin.read().split('\n')
+    flist.pop()
     if opts.test:
         datdir = args[0]
         test(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
@@ -618,8 +629,9 @@ def proc_main():
         response(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot)
     else:
         datdir = args[0]
-        main(datdir,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,
+        main(datdir,flist,nbeam=opts.beam,nprep=opts.data,doplot=opts.plot,
              save=opts.save,nostat=int(opts.nstat))
+
 
 if __name__ == '__main__':
     try:
