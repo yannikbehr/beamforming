@@ -3,6 +3,8 @@
 Plot output from beamforming averaged either over a month or over the
 whole deployment time.
 """
+import matplotlib
+matplotlib.use('Agg')
 from pylab import *
 import scipy.io as sio
 import sys
@@ -98,9 +100,10 @@ def polar_plot_panel(beam,theta,slowness,freqs,wtype,fout=None):
         ax.plot(theta*pi/180.,ones(theta.size)*1./v_cutoff,'k')
         ax.grid(True)
         ax.set_title("%s %ds period"%(wtype,periods[cnt-1]))
-        ax.set_rmax(0.5)
+        ax.set_rmax(0.6)
         cnt += 1
-    show()
+    if fout is not None:
+        savefig(fout)
 
 def monthly_average(fl,months,comp,new=True):
     fl.sort(cmp=mycmp)
@@ -194,7 +197,7 @@ def average(fl,comp,new=True,single_vel=True,fout='./average_beam.mat'):
     if single_vel:
         polar_plot(avbeam,theta,slowness,freqs,'rayleigh')
     else:
-        polar_plot_panel(avbeam,theta,slowness,freqs,'%s '%(comp))
+        polar_plot_panel(avbeam,theta,slowness,freqs,'%s '%(comp),fout=fout.replace('.mat','.png'))
 
 
 def main():
