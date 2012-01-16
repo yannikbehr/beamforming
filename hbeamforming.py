@@ -141,7 +141,8 @@ def calc_steer(slats,slons):
     #dot product betwen zeta and x
     zetax = zeta_x*sta_origin_x+zeta_y*sta_origin_y
     #slowness in s/km
-    slowness = arange(0.03,0.505,0.005)
+    #slowness = arange(0.03,0.505,0.005)
+    slowness = arange(0.03,0.605,0.005)
     #slowness = arange(0.125,0.51,0.01)
     slowness = slowness.reshape((1,slowness.size))
     return zetax,theta,slowness,sta_origin_x,sta_origin_y
@@ -349,7 +350,6 @@ def polar_plot(beam,theta,freqs,slowness,dt,nfft,wtype,fout=None):
     idx = [argmin(abs(freqs - 1./p)) for p in periods]
     theta = theta[:,0]
     slowness = slowness[0,:]
-    print idx
     for ind in idx:
         tre = squeeze(beam[:,:,:,ind])
         tre = tre.mean(axis=2)
@@ -520,7 +520,7 @@ def response(datdir,nprep=False,nbeam=False,doplot=True):
     zetax,theta,slowness,sta_origin_x,sta_origin_y = calc_steer(slats,slons)
     matfile2 = "%s_%s.mat"%('array_response',temp)
     nstat, ntimes, nsub, nfft = seisn.shape
-    slowness = arange(0.03,0.505,0.005)
+    #slowness = arange(0.03,0.505,0.005)
     slowness = slowness.reshape((1,slowness.size))
     indices = arange(nfft)
     newbeam = not os.path.isfile(matfile2)
@@ -581,7 +581,6 @@ def main(datdir,nprep=False,nbeam=False,doplot=True,save=False,nostat=20):
     newprep = not os.path.isfile(matfile1)
     if nprep:
         newprep = True
-    print nprep, newprep
     seisn, seise, freqs, meanlat, meanlon, slats, slons, dt = prep_beam_h(nlist,matfile1,
                                                                    nhours=1,fmax=sample_f,
                                                                    fact=sample_f,new=newprep,
