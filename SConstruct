@@ -36,6 +36,11 @@ dirn = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/beamforming/beams/'
 fout = os.path.join(dirn,'average_beam_horizontal.mat')
 PhonyTarget('avbtaraallh','ls %s |./plot_average_beam.py --comp=transverse -o %s'%(dirn+'beam_h_200*.mat',fout))
 
+# compute simple mean over all horizontal beamformer outputs from the second beamformer run
+dirn = '/Volumes/GeoPhysics_05/users-data/yannik78/taranaki/beamforming/beams_2/'
+fout = os.path.join(dirn,'average_beam_horizontal_2nd_run.mat')
+PhonyTarget('avbtaraallh2','ls %s |./plot_average_beam.py --comp=transverse -o %s'%(dirn+'beam_h_200*.mat',fout))
+
 
 #dirn = '/Volumes/Wanaka_01/yannik/start/beamforming'
 #            fl = glob.glob(os.path.join(dirn,'beam_h*.mat'))
