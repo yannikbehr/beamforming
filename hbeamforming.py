@@ -47,8 +47,8 @@ def prep_beam_h(files,matfile,nhours=1,fmax=10.,fact=10,new=True,onebit=False,ff
             tre.data -= tre.data.mean()
             tre.filter("bandpass",freqmin=0.02,freqmax=0.4,corners=4,zerophase=True)
             if (trn.stats.sampling_rate - 1.0) > 0.0001 and (tre.stats.sampling_rate - 1.0) > 0.0001:
-                trn.downsample(decimation_factor=fact, strict_length=True,no_filter=True)
-                tre.downsample(decimation_factor=fact, strict_length=True,no_filter=True)
+                trn.decimate(fact, strict_length=True,no_filter=True)
+                tre.decimate(fact, strict_length=True,no_filter=True)
             else:
                 continue
             nptsn = trn.stats.npts
