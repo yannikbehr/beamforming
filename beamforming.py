@@ -57,7 +57,7 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
             tr.data -= tr.data.mean()
             tr.filter("bandpass", freqmin=0.02, freqmax=0.4, corners=4, zerophase=True)
             if (tr.stats.sampling_rate - 1.0) > 0.0001:
-                tr.downsample(decimation_factor=fact, strict_length=True, no_filter=True)
+                tr.decimate(fact, strict_length=True, no_filter=True)
             else:
                 continue
             npts = tr.stats.npts
