@@ -1,7 +1,7 @@
 #!/usr/bin/env mypython
 
 """
-next try to rewrite laura's beamformer
+Plane wave beamforming for the vertical component.
 """
 
 import os
@@ -65,13 +65,13 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
             dt = tr.stats.delta
             seis0 = zeros(24 * 3600 * int(df))
             taper = cosTaper(tr.stats.npts)
-            #detrend(tr.data)
+            # detrend(tr.data)
             istart = int(round(((tr.stats.starttime.hour * 60 + tr.stats.starttime.minute) * 60\
                           + tr.stats.starttime.second) * df))
             if timenorm:
                 smoothdata = smooth(abs(tr.data), window_len=257, window='flat')
                 tr.data /= smoothdata
-            #seis0[istart:(istart+npts)] = tr.data*taper
+            # seis0[istart:(istart+npts)] = tr.data*taper
             try:
                 seis0[istart:(istart + npts)] = tr.data
             except ValueError, e:
@@ -99,7 +99,7 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
         ipick = arange(ismall)
         taper = cosTaper(len(ipick))
         n = nhours * 3600 * df
-        nsub = int(np.floor(n / ismall)) # Number of time pieces -20 mins long each
+        nsub = int(np.floor(n / ismall))  # Number of time pieces -20 mins long each
         seissmall = zeros((nfiles, ntimes, nsub, len(ipick)))
         for ii in xrange(nfiles):
             for jj in xrange(ntimes):
@@ -120,10 +120,10 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
         LatLref = -48
         LatUref = -34
         stacoord = vstack((slons, slats))
-        ##Find the stations which belong to this grid
+        # #Find the stations which belong to this grid
         idx = where((stacoord[0] >= LonLref) & (stacoord[0] <= LonUref) & \
                     (stacoord[1] >= LatLref) & (stacoord[1] <= LatUref))
-        #nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
+        # nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
         meanlat = slats.mean()
         meanlon = slons.mean()
 
@@ -146,7 +146,7 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
 
 def calc_steer(slats, slons):
     theta = arange(0, 362, 2)
-    #theta= arange(0,365,5)
+    # theta= arange(0,365,5)
     theta = theta.reshape((theta.size, 1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
@@ -158,15 +158,15 @@ def calc_steer(slats, slons):
         sta_origin_bearing = append(sta_origin_bearing, az)
     sta_origin_x = sta_origin_dist * cos(sta_origin_bearing * pi / 180.)
     sta_origin_y = sta_origin_dist * sin(sta_origin_bearing * pi / 180.)
-    #zeta_x = sta_origin_dist*cos(sta_origin_bearing*pi/180.)
-    #zeta_y = sta_origin_dist*sin(sta_origin_bearing*pi/180.)
+    # zeta_x = sta_origin_dist*cos(sta_origin_bearing*pi/180.)
+    # zeta_y = sta_origin_dist*sin(sta_origin_bearing*pi/180.)
     zeta_x = -cos(theta * pi / 180.)
     zeta_y = -sin(theta * pi / 180.)
-    #dot product betwen zeta and x
+    # dot product betwen zeta and x
     zetax = zeta_x * sta_origin_x + zeta_y * sta_origin_y
-    #slowness in s/km
+    # slowness in s/km
     slowness = arange(0.03, 0.505, 0.005)
-    #slowness = arange(0.125,0.51,0.01)
+    # slowness = arange(0.125,0.51,0.01)
     slowness = slowness.reshape((1, slowness.size))
     return zetax, theta, slowness, sta_origin_x, sta_origin_y
 
@@ -185,9 +185,9 @@ def beamforming(seis, freqs, slowness, theta, zetax, nsources, dt, indices, new=
                 if not DEBUG:
                     count += 1
                     pbar.update(count)
-            #for tt in [0]:
+            # for tt in [0]:
                 for TT in xrange(nsub):
-                #for TT in [0]:
+                # for TT in [0]:
                     Y = asmatrix(squeeze(seis[:, tt, TT, ww]))
                     YT = Y.T.copy()
                     R = dot(YT, conjugate(Y))
@@ -230,14 +230,14 @@ def arr_resp(nfft, dt, nstat, indices, slowness, zetax, theta, sta_origin_x, sta
                 if src:
                     e_src = exp(1j * zeta_src * omega / c1).T
                     Y = multiply(ones((zetax.shape[1], 1), 'complex128'), atleast_2d(e_src).T)
-                    #Y = ones((zetax.shape[1],1),'complex128')
+                    # Y = ones((zetax.shape[1],1),'complex128')
                     R = dot(Y, conjugate(Y).T)
                 else:
                     R = ones((zetax.shape[1], zetax.shape[1]))
-                #beam[:,cc,ww] = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
+                # beam[:,cc,ww] = atleast_2d(sum(abs(asarray(dot(conjugate(e_steer.T),dot(R,e_steer))))**2,axis=1))
 
                 beam[:, cc, ww] += 1. / (nstat * nstat) ** 2 * diag(abs(asarray(dot(conjugate(e_steer.T), dot(R, e_steer)))) ** 2)
-                #print abs(R.max()), abs(R.min()), abs(beam[:, cc, ww].max()), abs(beam[:, cc, ww].min())
+                # print abs(R.max()), abs(R.min()), abs(beam[:, cc, ww].max()), abs(beam[:, cc, ww].min())
         if matfile is not None:
             sio.savemat(matfile, {'beam':beam})
         return beam
@@ -255,9 +255,9 @@ def polar_plot(beam, theta, freqs, slowness, dt, nfft, wtype, fout=None):
     for ind in idx:
         tre = squeeze(beam[:, :, :, ind])
         tre = tre[:, :, :].mean(axis=2)
-        #tre = tre-tre.max()
+        # tre = tre-tre.max()
         fig = figure(figsize=(6, 6))
-        #ax = fig.add_subplot(1,1,1,projection='polar')
+        # ax = fig.add_subplot(1,1,1,projection='polar')
         cax = fig.add_axes([0.85, 0.2, 0.05, 0.5])
         ax = fig.add_axes([0.10, 0.1, 0.70, 0.7], polar=True)
         cmap = cm.get_cmap('jet')
@@ -284,7 +284,7 @@ def polar_plot_resp(beam, theta, slowness, dt, nfft, periods=[6.], polar=True):
     slowness = slowness[0, :]
     for ind in idx:
         tre = squeeze(beam[:, :, ind])
-        #tre = tre-tre.max()
+        # tre = tre-tre.max()
         fig = figure(figsize=(6, 6))
         if polar:
             ax = fig.add_subplot(1, 1, 1, projection='polar')
@@ -349,8 +349,6 @@ def response(datdir, nprep=False, nbeam=False, doplot=True):
     show()
 
 def main(datdir, files, nprep=False, nbeam=False, doplot=True, save=False, nostat=20):
-    #files = glob.glob(os.path.join(datdir,'ft_*.*HZ.SAC'))
-    #files = glob.glob(os.path.join(datdir,'[!^ft]*.*HZ.SAC'))
     if len(files) < nostat:
         print "not enough files in ", datdir
         print len(files), nostat
@@ -381,7 +379,7 @@ def main(datdir, files, nprep=False, nbeam=False, doplot=True, save=False, nosta
     df = dt / nfft
     periods = [6.]
     periods = [6., 1. / 0.148]
-    #periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
+    # periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
     indices = [argmin(abs(freqs - 1. / p)) for p in periods]
     beam = beamforming(fseis, freqs, slowness, theta, zetax, theta.size, dt, indices,
                               new=newbeam, matfile=matfile2, laura=False)
@@ -396,12 +394,7 @@ def main(datdir, files, nprep=False, nbeam=False, doplot=True, save=False, nosta
 
 def proc_main():
     from optparse import OptionParser
-    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Feb/2001_2_22_0_0_0/'
-    #datdir = '/Volumes/Wanaka_01/yannik/start/sacfiles/10Hz/2001/Mar/2001_3_3_0_0_0/'
     parser = OptionParser()
-    parser.add_option("-t", "--test", dest="test", action="store_true",
-                      help="Run a synthetic test using the given network layout.",
-                      default=False)
     parser.add_option("-b", "--beam", dest="beam", action="store_true",
                       help="Recalculate beam.",
                       default=False)
@@ -425,10 +418,7 @@ def proc_main():
 
     flist = sys.stdin.read().split('\n')
     flist.pop()
-    if opts.test:
-        datdir = args[0]
-        test(datdir, nbeam=opts.beam, nprep=opts.data, doplot=opts.plot)
-    elif opts.aresp:
+    if opts.aresp:
         datdir = args[0]
         response(datdir, nbeam=opts.beam, nprep=opts.data, doplot=opts.plot)
     else:
