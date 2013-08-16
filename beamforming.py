@@ -29,21 +29,62 @@ from smooth import smooth
 rcParams = {'backend':'Agg'}
 
 DEBUG = False
-def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=False,
+def prep_beam(files, matfile, nhours=1, fsamp=10., threshold_std=0.5, onebit=False,
               tempfilter=False, specwhite=True, timenorm=False, fact=10, new=True,
-              fftpower=7, freq_int=(0.02, 0.4), laura=False):
+              fftpower=7, freq_int=(0.02, 0.4)):
+    """
+    Prepare the raw data before the beamforming. This comprises bandpass
+    filtering, cutting the data into smaller chunks, removing the mean and
+    down-weighting strong transient signals from for example earthquakes. One
+    can chose between several methods to remove transients: 1-bit normalization,
+    time domain normalization, which computes a smoothed traces of the absolute
+    amplitude and down-weights the original trace by this smoothed trace, and a
+    threshold based method that clips the trace at a predefined factor of the
+    traces standard deviation. Note that currently no instrument correction is
+    applied so the input traces either have to be already corrected for the
+    instrument response, they need to be filtered within a frequency band for
+    which all instrument responses are flat or they need to be all from the
+    same instruments.
+
+    :param files: Day long vertical component SAC files.
+    :param matfile: Name of the file to which the pre-processed traces are
+                    written. This saves the time of repeatedly running the
+                    pre-processing for beamformer runs with different parameters.
+                    The output file is a *.mat file that can also be read with
+                    Matlab.
+    :param nhours: Input data is cut into chunks of length nhours.
+    :param fsamp:  Sampling frequency of the input data.
+    :param threshold_std: Clipping factor; values greater than
+                          treshold_std * std(trace) are set to threshold_std.
+    :param onebit: Turn on/off 1-bit normalization
+    :param tempfilter: Turn on/off threshold based clipping.
+    :param specwhite: Turn on/off spectral whitening (only retain spectral phase
+                      and set spectral amplitude to one.
+    :param timenomr: Turn on/off time domain normalization.
+    :param fact: Decimation factor.
+    :param new: If set to false it will try to load all return values from
+                matfile. If true it will compute all return values from scratch.
+    :param fftpower: Length of data chunks cut before the FFT.
+    :param freq_int: Frequency interval for the band-pass filter.
+
+    :return fseis: Pre-processed traces in the frequency domain.
+    :return freqs: Frequency array corresponding to fseis
+    :return meanlat: Average station latitude (latitude of the center of the array).
+    :return meanlon: Average station longitude (longitude of the center of the array).
+    :return slats: Station latitudes.
+    :return slons: Station longitudes.
+    :return dt: Sampling interval after decimation.
+    :return seissmall: Pre-processed traces in the time domain.
+    """
     if new:
         ntimes = int(round(24 / nhours))
-        step = nhours * 3600 * fmax / fact
+        step = nhours * 3600 * fsamp / fact
         stations = []
         slons = array([])
         slats = array([])
         nfiles = len(files)
         seisband = zeros((nfiles, ntimes, step))
-        if laura:
-            freqs = (fmax / fact) / 2.*np.arange(1, 2 ** (fftpower - 1) + 1) / 2 ** (fftpower - 1)
-        else:
-            freqs = fftfreq(2 ** fftpower, 1. / (fmax / fact))
+        freqs = fftfreq(2 ** fftpower, 1. / (fsamp / fact))
         for i, _f in enumerate(files):
             tr = read(_f)[0]
             staname = tr.stats.station
@@ -55,7 +96,8 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
             if staname not in stations:
                 stations.append(staname)
             tr.data -= tr.data.mean()
-            tr.filter("bandpass", freqmin=0.02, freqmax=0.4, corners=4, zerophase=True)
+            tr.filter("bandpass", freqmin=freq_int[0], freqmax=freq_int[1],
+                      corners=4, zerophase=True)
             if (tr.stats.sampling_rate - 1.0) > 0.0001:
                 tr.decimate(fact, strict_length=True, no_filter=True)
             else:
@@ -64,14 +106,12 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
             df = tr.stats.sampling_rate
             dt = tr.stats.delta
             seis0 = zeros(24 * 3600 * int(df))
-            taper = cosTaper(tr.stats.npts)
             # detrend(tr.data)
             istart = int(round(((tr.stats.starttime.hour * 60 + tr.stats.starttime.minute) * 60\
                           + tr.stats.starttime.second) * df))
             if timenorm:
                 smoothdata = smooth(abs(tr.data), window_len=257, window='flat')
                 tr.data /= smoothdata
-            # seis0[istart:(istart+npts)] = tr.data*taper
             try:
                 seis0[istart:(istart + npts)] = tr.data
             except ValueError, e:
@@ -94,7 +134,6 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
                 seisband[i] = where(abs(seisband[i]) > threshold, threshold * sign(seisband[i]), seisband[i])
                 seisband[i] = apply_along_axis(lambda e: e - e.mean(), 1, seisband[i])
 
-
         ismall = 2 ** fftpower
         ipick = arange(ismall)
         taper = cosTaper(len(ipick))
@@ -115,15 +154,16 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
         if specwhite:
             fseis = exp(angle(fseis) * 1j)
 
+        # This needs to be changed it one doesn't use data from the Taranaki array
         LonLref = 165
         LonUref = 179.9
         LatLref = -48
         LatUref = -34
         stacoord = vstack((slons, slats))
-        # #Find the stations which belong to this grid
+        # Find the stations which belong to this grid
         idx = where((stacoord[0] >= LonLref) & (stacoord[0] <= LonUref) & \
                     (stacoord[1] >= LatLref) & (stacoord[1] <= LatUref))
-        # nb. this simple 'mean' calc only works if we don't cross lat=0 or lon=180
+        # This simple 'mean' calculation only works if we don't cross lat=0 or lon=180
         meanlat = slats.mean()
         meanlon = slons.mean()
 
@@ -143,10 +183,11 @@ def prep_beam(files, matfile, nhours=1, fmax=10., threshold_std=0.5, onebit=Fals
         meanlon = slons.mean()
         return fseis, freqs, meanlat, meanlon, slats, slons, dt, seissmall
 
-
 def calc_steer(slats, slons):
+    """
+    Compute the steering vector
+    """
     theta = arange(0, 362, 2)
-    # theta= arange(0,365,5)
     theta = theta.reshape((theta.size, 1))
     sta_origin_dist = array([])
     sta_origin_bearing = array([])
@@ -170,7 +211,10 @@ def calc_steer(slats, slons):
     slowness = slowness.reshape((1, slowness.size))
     return zetax, theta, slowness, sta_origin_x, sta_origin_y
 
-def beamforming(seis, freqs, slowness, theta, zetax, nsources, dt, indices, new=True, matfile=None, laura=False):
+def beamforming(seis, freqs, slowness, theta, zetax, nsources, dt, indices, new=True, matfile=None):
+    """
+    Compute the beam in the frequency domain.
+    """
     if new:
         nstat, ntimes, nsub, nfft = seis.shape
         beam = zeros((nsources, slowness.size, ntimes, nfft))
@@ -185,9 +229,7 @@ def beamforming(seis, freqs, slowness, theta, zetax, nsources, dt, indices, new=
                 if not DEBUG:
                     count += 1
                     pbar.update(count)
-            # for tt in [0]:
                 for TT in xrange(nsub):
-                # for TT in [0]:
                     Y = asmatrix(squeeze(seis[:, tt, TT, ww]))
                     YT = Y.T.copy()
                     R = dot(YT, conjugate(Y))
@@ -196,10 +238,7 @@ def beamforming(seis, freqs, slowness, theta, zetax, nsources, dt, indices, new=
                         velocity = 1. / slowness[0][cc] * 1000
                         e_steer = exp(-1j * zetax * omega / velocity)
                         e_steerT = e_steer.T.copy()
-                        if laura:
-                            beam[:, cc, tt, ww] += sum(abs(asarray(dot(conjugate(e_steer), dot(R, e_steerT)))) ** 2, axis=1) / nsub
-                        else:
-                            beam[:, cc, tt, ww] += 1. / (nstat * nstat) * diag(abs(asarray(dot(conjugate(e_steer), dot(R, e_steerT)))) ** 2) / nsub
+                        beam[:, cc, tt, ww] += 1. / (nstat * nstat) * diag(abs(asarray(dot(conjugate(e_steer), dot(R, e_steerT)))) ** 2) / nsub
         if not DEBUG:
             pbar.finish()
         if matfile is not None:
@@ -211,7 +250,7 @@ def beamforming(seis, freqs, slowness, theta, zetax, nsources, dt, indices, new=
 def arr_resp(nfft, dt, nstat, indices, slowness, zetax, theta, sta_origin_x, sta_origin_y,
              new=True, matfile=None, src=False, src_param=(90, 3000)):
     """
-    calculate array response
+    Compute the array response.
     """
     if new:
         if src_param is not None:
@@ -244,7 +283,6 @@ def arr_resp(nfft, dt, nstat, indices, slowness, zetax, theta, sta_origin_x, sta
     else:
         beam = sio.loadmat(matfile)['beam']
         return beam
-
 
 def polar_plot(beam, theta, freqs, slowness, dt, nfft, wtype, fout=None):
     df = dt / nfft
@@ -313,11 +351,10 @@ def polar_plot_resp(beam, theta, slowness, dt, nfft, periods=[6.], polar=True):
         ax.grid(True)
         ax.set_title("%s %ds period" % ('Array response', 1. / (ind * df)))
 
-def response(datdir, nprep=False, nbeam=False, doplot=True):
+def response(datdir, files, nprep=False, nbeam=False, doplot=True):
     """
     Calculate the theoretical array response
     """
-    files = glob.glob(os.path.join(datdir, 'ft_*.*HZ.SAC'))
     if len(files) < 2:
         print "not enough files in ", datdir
         return
@@ -331,7 +368,7 @@ def response(datdir, nprep=False, nbeam=False, doplot=True):
     if nprep:
         newprep = True
     fseis, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files, matfile1, onebit=False,
-                                                                     nhours=1, fmax=sample_f,
+                                                                     nhours=1, fsamp=sample_f,
                                                                      fact=sample_f,
                                                                      tempfilter=True, new=newprep)
     zetax, theta, slowness, sta_origin_x, sta_origin_y = calc_steer(slats, slons)
@@ -363,8 +400,8 @@ def main(datdir, files, nprep=False, nbeam=False, doplot=True, save=False, nosta
     if nprep:
         newprep = True
     fseis, freqs, meanlat, meanlon, slats, slons, dt, seissmall = prep_beam(files, matfile1,
-                                                                           nhours=1, fmax=sample_f,
-                                                                           new=newprep, laura=False,
+                                                                           nhours=1, fsamp=sample_f,
+                                                                           new=newprep,
                                                                            fact=sample_f,
                                                                            onebit=False,
                                                                            tempfilter=True,
@@ -382,7 +419,7 @@ def main(datdir, files, nprep=False, nbeam=False, doplot=True, save=False, nosta
     # periods = [4.,5.,6.,7.,8.,9.,10.,12.,15.,18.]
     indices = [argmin(abs(freqs - 1. / p)) for p in periods]
     beam = beamforming(fseis, freqs, slowness, theta, zetax, theta.size, dt, indices,
-                              new=newbeam, matfile=matfile2, laura=False)
+                              new=newbeam, matfile=matfile2)
     if doplot:
         fout = None
         if save:
@@ -390,7 +427,6 @@ def main(datdir, files, nprep=False, nbeam=False, doplot=True, save=False, nosta
         polar_plot(beam, theta, freqs, slowness, dt, nfft, 'rayleigh', fout=fout)
         if not save:
             show()
-
 
 def proc_main():
     from optparse import OptionParser
@@ -420,7 +456,7 @@ def proc_main():
     flist.pop()
     if opts.aresp:
         datdir = args[0]
-        response(datdir, nbeam=opts.beam, nprep=opts.data, doplot=opts.plot)
+        response(datdir, flist, nbeam=opts.beam, nprep=opts.data, doplot=opts.plot)
     else:
         datdir = args[0]
         main(datdir, flist, nbeam=opts.beam, nprep=opts.data, doplot=opts.plot,
